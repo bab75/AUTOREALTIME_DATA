@@ -15,6 +15,25 @@ if 'selected_interval' not in st.session_state:
 if 'input_key' not in st.session_state:
     st.session_state.input_key = 0
 
+# Custom CSS for circular animation ring
+st.markdown("""
+<style>
+.loader {
+    border: 8px solid #f3f3f3; /* Light grey */
+    border-top: 8px solid #3498db; /* Blue */
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 10px auto;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Function to get stock data
 def get_stock_data(symbol, interval, period='1d'):
     try:
@@ -26,7 +45,7 @@ def get_stock_data(symbol, interval, period='1d'):
         volume = df['Volume'][-1] if not df.empty else None
         low_price = df['Low'].min() if not df.empty else None
         high_price = df['High'].max() if not df.empty else None
-        timestamp = df.index[-1].strftime('%Y-%m-%d %H:%M:%S') if not df.empty else None
+        timestamp = df.index[-1].strftime('%Y-%m-%d %H:%M:%S') if not df.empty else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         return df, {
             'price': current_price,
             'volume': volume,
@@ -84,8 +103,9 @@ if st.session_state.watchlist:
     for symbol in st.session_state.watchlist:
         st.write(f"- {symbol}")
 
-    # Fetch and display data for each stock with spinner and progress bar
+    # Fetch and display data with spinner, progress bar, and circular loader
     with st.spinner("Fetching stock data..."):
+        st.markdown('<div class="loader"></div>', unsafe_allow_html=True)  # Circular animation ring
         progress_bar = st.progress(0)
         total_stocks = len(st.session_state.watchlist)
         for i, symbol in enumerate(st.session_state.watchlist):
@@ -93,8 +113,8 @@ if st.session_state.watchlist:
             df, info = get_stock_data(symbol, st.session_state.selected_interval)
             
             if df is not None and info:
-                # Display stock details with timestamp
-                st.write(f"**As of {info['timestamp']}**")
+                # Display stock details with prominent timestamp
+                st.markdown(f"**As of {info['timestamp']}**", unsafe_allow_html=True)
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("Current Price", f"${info['price']:.2f}")
@@ -115,7 +135,6 @@ if st.session_state.watchlist:
             # Update progress bar
             progress = (i + 1) / total_stocks
             progress_bar.progress(progress)
-            time.sleep(0.3)  # Slight delay to make progress visible
         
         st.success(f"Data updated at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
