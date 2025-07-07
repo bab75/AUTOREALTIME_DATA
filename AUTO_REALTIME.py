@@ -14,24 +14,72 @@ if 'selected_interval' not in st.session_state:
     st.session_state.selected_interval = '1m'
 if 'input_key' not in st.session_state:
     st.session_state.input_key = 0
+if 'animation_start' not in st.session_state:
+    st.session_state.animation_start = time.time()
 
-# Custom CSS for circular animation ring
+# Custom HTML/CSS/JavaScript for circular progress ring
 st.markdown("""
 <style>
-.loader {
-    border: 8px solid #f3f3f3; /* Light grey */
-    border-top: 8px solid #3498db; /* Blue */
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    animation: spin 1s linear infinite;
-    margin: 10px auto;
+.progress-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 20px 0;
 }
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+.progress-ring {
+    position: relative;
+    width: 100px;
+    height: 100px;
+}
+.progress-ring__circle {
+    transform: rotate(-90deg);
+    transform-origin: 50% 50%;
+}
+.progress-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 18px;
+    font-weight: bold;
+    color: #ffffff;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+}
+.progress-interval {
+    font-size: 16px;
+    color: #ffffff;
+    margin-top: 10px;
+    font-weight: bold;
+}
+body {
+    background: linear-gradient(135deg, #1e3c72, #2a5298);
 }
 </style>
+<script>
+function updateProgressRing(intervalSeconds) {
+    const circle = document.getElementById('progress-circle');
+    const text = document.getElementById('progress-text');
+    const startTime = Date.now() / 1000;
+    const circumference = 2 * Math.PI * 45; // Radius = 45
+    circle.style.strokeDasharray = `${circumference} ${circumference}`;
+    
+    function animate() {
+        const elapsed = (Date.now() / 1000) - startTime;
+        const progress = Math.min(elapsed / intervalSeconds, 1);
+        const dashOffset = circumference * (1 - progress);
+        circle.style.strokeDashoffset = dashOffset;
+        text.textContent = Math.ceil(intervalSeconds - elapsed) + 's';
+        if (progress < 1) {
+            requestAnimationFrame(animate);
+        } else {
+            circle.style.strokeDashoffset = circumference; // Reset
+            text.textContent = intervalSeconds + 's';
+            setTimeout(() => updateProgressRing(intervalSeconds), 1000); // Restart after 1s
+        }
+    }
+    animate();
+}
+</script>
 """, unsafe_allow_html=True)
 
 # Function to get stock data
@@ -88,6 +136,7 @@ if st.sidebar.button("Add to Watchlist"):
             st.session_state.watchlist.append(symbol_input)
             st.session_state.selected_interval = interval
             st.session_state.input_key += 1  # Reset input field
+            st.session_state.animation_start = time.time()  # Reset animation
             st.sidebar.success(f"{symbol_input} added to watchlist!")
         else:
             st.sidebar.warning(f"{symbol_input} is already in the watchlist!")
@@ -103,9 +152,32 @@ if st.session_state.watchlist:
     for symbol in st.session_state.watchlist:
         st.write(f"- {symbol}")
 
-    # Fetch and display data with spinner, progress bar, and circular loader
+    # Display animated progress ring
+    interval_seconds = interval_options[st.session_state.selected_interval]
+    st.markdown(f"""
+    <div class="progress-container">
+        <div class="progress-ring">
+            <svg width="100" height="100">
+                <circle cx="50" cy="50" r="45" stroke="#e0e0e0" stroke-width="8" fill="none"/>
+                <circle id="progress-circle" class="progress-ring__circle" cx="50" cy="50" r="45" stroke="url(#gradient)" stroke-width="8" fill="none"/>
+                <defs>
+                    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#3498db;stop-opacity:1"/>
+                        <stop offset="100%" style="stop-color:#2ecc71;stop-opacity:1"/>
+                    </linearGradient>
+                </defs>
+            </svg>
+            <div id="progress-text" class="progress-text">{interval_seconds}s</div>
+        </div>
+        <div class="progress-interval">Interval: {st.session_state.selected_interval}</div>
+    </div>
+    <script>
+        updateProgressRing({interval_seconds});
+    </script>
+    """, unsafe_allow_html=True)
+
+    # Fetch and display data with spinner and progress bar
     with st.spinner("Fetching stock data..."):
-        st.markdown('<div class="loader"></div>', unsafe_allow_html=True)  # Circular animation ring
         progress_bar = st.progress(0)
         total_stocks = len(st.session_state.watchlist)
         for i, symbol in enumerate(st.session_state.watchlist):
@@ -114,7 +186,7 @@ if st.session_state.watchlist:
             
             if df is not None and info:
                 # Display stock details with prominent timestamp
-                st.markdown(f"**As of {info['timestamp']}**", unsafe_allow_html=True)
+                st.markdown(f"<h3 style='color: #ffffff;'>As of {info['timestamp']}</h3>", unsafe_allow_html=True)
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("Current Price", f"${info['price']:.2f}")
@@ -138,12 +210,12 @@ if st.session_state.watchlist:
         
         st.success(f"Data updated at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # Auto-refresh logic with slight delay
+    # Auto-refresh logic
     current_time = time.time()
     refresh_interval = interval_options[st.session_state.selected_interval]
     if current_time - st.session_state.last_update >= refresh_interval:
-        time.sleep(0.5)  # Short delay to stabilize UI
         st.session_state.last_update = current_time
+        st.session_state.animation_start = current_time  # Reset animation
         st.rerun()
 else:
     st.info("Add a stock symbol to the watchlist to start tracking.")
