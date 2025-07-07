@@ -84,9 +84,11 @@ if st.session_state.watchlist:
     for symbol in st.session_state.watchlist:
         st.write(f"- {symbol}")
 
-    # Fetch and display data for each stock with spinner
-    with st.spinner("Updating stock data..."):
-        for symbol in st.session_state.watchlist:
+    # Fetch and display data for each stock with spinner and progress bar
+    with st.spinner("Fetching stock data..."):
+        progress_bar = st.progress(0)
+        total_stocks = len(st.session_state.watchlist)
+        for i, symbol in enumerate(st.session_state.watchlist):
             st.subheader(f"Stock: {symbol}")
             df, info = get_stock_data(symbol, st.session_state.selected_interval)
             
@@ -109,6 +111,12 @@ if st.session_state.watchlist:
                     st.plotly_chart(fig, use_container_width=True)
             else:
                 st.error(f"No data available for {symbol}.")
+            
+            # Update progress bar
+            progress = (i + 1) / total_stocks
+            progress_bar.progress(progress)
+            time.sleep(0.3)  # Slight delay to make progress visible
+        
         st.success(f"Data updated at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     # Auto-refresh logic with slight delay
