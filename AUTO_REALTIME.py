@@ -18,7 +18,7 @@ if 'input_key' not in st.session_state:
 if 'animation_start' not in st.session_state:
     st.session_state.animation_start = time.time()
 
-# Custom CSS/JavaScript for smaller animated progress ring
+# Custom CSS/JavaScript for animated progress ring
 st.markdown("""
 <style>
 .progress-container {
@@ -53,7 +53,7 @@ st.markdown("""
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    font-size: 18px;
+    font-size: 20px;
     font-weight: bold;
     color: #000000;
 }
@@ -85,13 +85,13 @@ function updateProgressRing(intervalSeconds, startTime) {
         const progress = Math.min(elapsed / intervalSeconds, 1);
         const dashOffset = circumference * (1 - progress);
         circle.style.strokeDashoffset = dashOffset;
-        text.textContent = Math.ceil(intervalSeconds - elapsed) + 's';
-        if (progress >= 1) {
+        text.textContent = Math.max(Math.ceil(intervalSeconds - elapsed), 0) + 's';
+        if (progress < 1) {
+            requestAnimationFrame(animate);
+        } else {
             circle.classList.add('pulse');
             setTimeout(() => circle.classList.remove('pulse'), 1000);
             setTimeout(() => updateProgressRing(intervalSeconds, Date.now() / 1000), 1000);
-        } else {
-            requestAnimationFrame(animate);
         }
     }
     animate();
@@ -154,9 +154,10 @@ if st.sidebar.button("Add to Watchlist"):
         if symbol_input not in st.session_state.watchlist:
             st.session_state.watchlist.append(symbol_input)
             st.session_state.selected_interval = interval
-            st.session_state.input_key += 1
+            st.session_state.input_key += 1  # Increment key only on successful add
             st.session_state.animation_start = time.time()
             st.sidebar.success(f"{symbol_input} added to watchlist!")
+            st.experimental_rerun()  # Force re-render to update UI
         else:
             st.sidebar.warning(f"{symbol_input} is already in the watchlist!")
     else:
@@ -199,16 +200,25 @@ if st.session_state.watchlist:
     </script>
     """, unsafe_allow_html=True)
 
-    # Fetch and display data with spinner and progress bar
+    # Simulate time-based progress bar
+    current_time = time.time()
+    elapsed = current_time - st.session_state.last_update
+    refresh_interval = interval_options[st.session_state.selected_interval]
+    progress = min(elapsed / refresh_interval, 1)
+    progress_bar = st.progress(progress)
+    if progress >= 1:
+        st.session_state.last_update = current_time
+        st.session_state.animation_start = current_time
+        st.experimental_rerun()
+
+    # Fetch and display data with spinner
     with st.spinner("Fetching stock data..."):
-        progress_bar = st.progress(0)
         total_stocks = len(st.session_state.watchlist)
         for i, symbol in enumerate(st.session_state.watchlist):
             st.subheader(f"Stock: {symbol}")
             df, info = get_stock_data(symbol, st.session_state.selected_interval)
             
             if df is not None and info:
-                # Display stock details with timestamps
                 st.markdown(f"<div class='stock-timestamp'>As of {info['timestamp']}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div class='yfinance-time'>yfinance Time (Local): {info['timestamp']}</div>", unsafe_allow_html=True)
                 col1, col2, col3, col4 = st.columns(4)
@@ -221,25 +231,13 @@ if st.session_state.watchlist:
                 with col4:
                     st.metric("Volume", f"{info['volume']:,}")
                 
-                # Display candlestick chart
                 fig = create_candlestick_chart(df, symbol)
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
             else:
                 st.error(f"No data available for {symbol}.")
-            
-            # Update progress bar
-            progress = (i + 1) / total_stocks
-            progress_bar.progress(progress)
-        
+
         st.success(f"Data updated at {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-    # Auto-refresh logic
-    current_time = time.time()
-    refresh_interval = interval_options[st.session_state.selected_interval]
-    if current_time - st.session_state.last_update >= refresh_interval + 1:  # Add buffer to stabilize
-        st.session_state.last_update = current_time
-        st.session_state.animation_start = current_time
-        st.rerun()
 else:
     st.info("Add a stock symbol to the watchlist to start tracking.")
