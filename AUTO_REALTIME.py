@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import time
 from datetime import datetime, timedelta
+import pytz
 
 # Initialize session state
 if 'watchlist' not in st.session_state:
@@ -17,7 +18,7 @@ if 'input_key' not in st.session_state:
 if 'animation_start' not in st.session_state:
     st.session_state.animation_start = time.time()
 
-# Custom HTML/CSS/JavaScript for circular progress ring
+# Custom CSS/JavaScript for animated progress ring
 st.markdown("""
 <style>
 .progress-container {
@@ -25,42 +26,51 @@ st.markdown("""
     flex-direction: column;
     align-items: center;
     margin: 20px 0;
+    background: rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
 }
 .progress-ring {
     position: relative;
-    width: 100px;
-    height: 100px;
+    width: 120px;
+    height: 120px;
 }
 .progress-ring__circle {
     transform: rotate(-90deg);
     transform-origin: 50% 50%;
+    transition: stroke-dashoffset 0.1s linear;
 }
 .progress-text {
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    font-size: 18px;
+    font-size: 20px;
     font-weight: bold;
     color: #ffffff;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
 }
 .progress-interval {
-    font-size: 16px;
-    color: #ffffff;
-    margin-top: 10px;
+    font-size: 18px;
+    color: #00ffcc;
     font-weight: bold;
+    margin-top: 10px;
 }
 body {
     background: linear-gradient(135deg, #1e3c72, #2a5298);
 }
+.system-time {
+    font-size: 16px;
+    color: #ffffff;
+    margin-bottom: 10px;
+}
 </style>
 <script>
-function updateProgressRing(intervalSeconds) {
+function updateProgressRing(intervalSeconds, startTime) {
     const circle = document.getElementById('progress-circle');
     const text = document.getElementById('progress-text');
-    const startTime = Date.now() / 1000;
-    const circumference = 2 * Math.PI * 45; // Radius = 45
+    const circumference = 2 * Math.PI * 50; // Radius = 50
     circle.style.strokeDasharray = `${circumference} ${circumference}`;
     
     function animate() {
@@ -74,7 +84,7 @@ function updateProgressRing(intervalSeconds) {
         } else {
             circle.style.strokeDashoffset = circumference; // Reset
             text.textContent = intervalSeconds + 's';
-            setTimeout(() => updateProgressRing(intervalSeconds), 1000); // Restart after 1s
+            setTimeout(() => updateProgressRing(intervalSeconds, Date.now() / 1000), 1000);
         }
     }
     animate();
@@ -93,13 +103,17 @@ def get_stock_data(symbol, interval, period='1d'):
         volume = df['Volume'][-1] if not df.empty else None
         low_price = df['Low'].min() if not df.empty else None
         high_price = df['High'].max() if not df.empty else None
-        timestamp = df.index[-1].strftime('%Y-%m-%d %H:%M:%S') if not df.empty else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        timestamp = df.index[-1]
+        # Convert yfinance timestamp to local system timezone
+        local_tz = datetime.now().astimezone().tzinfo
+        timestamp_local = timestamp.tz_convert(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
         return df, {
             'price': current_price,
             'volume': volume,
             'low': low_price,
             'high': high_price,
-            'timestamp': timestamp
+            'timestamp': timestamp_local,
+            'timestamp_original': timestamp
         }
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
@@ -135,8 +149,8 @@ if st.sidebar.button("Add to Watchlist"):
         if symbol_input not in st.session_state.watchlist:
             st.session_state.watchlist.append(symbol_input)
             st.session_state.selected_interval = interval
-            st.session_state.input_key += 1  # Reset input field
-            st.session_state.animation_start = time.time()  # Reset animation
+            st.session_state.input_key += 1
+            st.session_state.animation_start = time.time()
             st.sidebar.success(f"{symbol_input} added to watchlist!")
         else:
             st.sidebar.warning(f"{symbol_input} is already in the watchlist!")
@@ -145,6 +159,10 @@ if st.sidebar.button("Add to Watchlist"):
 
 # Main app
 st.title("Stock Market Watchlist")
+
+# Display current system time
+current_system_time = datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')
+st.markdown(f"<div class='system-time'>System Time: {current_system_time}</div>", unsafe_allow_html=True)
 
 # Display watchlist
 if st.session_state.watchlist:
@@ -157,13 +175,13 @@ if st.session_state.watchlist:
     st.markdown(f"""
     <div class="progress-container">
         <div class="progress-ring">
-            <svg width="100" height="100">
-                <circle cx="50" cy="50" r="45" stroke="#e0e0e0" stroke-width="8" fill="none"/>
-                <circle id="progress-circle" class="progress-ring__circle" cx="50" cy="50" r="45" stroke="url(#gradient)" stroke-width="8" fill="none"/>
+            <svg width="120" height="120">
+                <circle cx="60" cy="60" r="50" stroke="#e0e0e0" stroke-width="10" fill="none"/>
+                <circle id="progress-circle" class="progress-ring__circle" cx="60" cy="60" r="50" stroke="url(#gradient)" stroke-width="10" fill="none"/>
                 <defs>
                     <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
                         <stop offset="0%" style="stop-color:#3498db;stop-opacity:1"/>
-                        <stop offset="100%" style="stop-color:#2ecc71;stop-opacity:1"/>
+                        <stop offset="100%" style="stop-color:#9b59b6;stop-opacity:1"/>
                     </linearGradient>
                 </defs>
             </svg>
@@ -172,7 +190,7 @@ if st.session_state.watchlist:
         <div class="progress-interval">Interval: {st.session_state.selected_interval}</div>
     </div>
     <script>
-        updateProgressRing({interval_seconds});
+        updateProgressRing({interval_seconds}, {st.session_state.animation_start});
     </script>
     """, unsafe_allow_html=True)
 
@@ -185,8 +203,9 @@ if st.session_state.watchlist:
             df, info = get_stock_data(symbol, st.session_state.selected_interval)
             
             if df is not None and info:
-                # Display stock details with prominent timestamp
+                # Display stock details with timestamps
                 st.markdown(f"<h3 style='color: #ffffff;'>As of {info['timestamp']}</h3>", unsafe_allow_html=True)
+                st.markdown(f"<p style='color: #00ffcc;'>yfinance Time (Local): {info['timestamp']}</p>", unsafe_allow_html=True)
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("Current Price", f"${info['price']:.2f}")
@@ -208,14 +227,14 @@ if st.session_state.watchlist:
             progress = (i + 1) / total_stocks
             progress_bar.progress(progress)
         
-        st.success(f"Data updated at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        st.success(f"Data updated at {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
     # Auto-refresh logic
     current_time = time.time()
     refresh_interval = interval_options[st.session_state.selected_interval]
     if current_time - st.session_state.last_update >= refresh_interval:
         st.session_state.last_update = current_time
-        st.session_state.animation_start = current_time  # Reset animation
+        st.session_state.animation_start = current_time
         st.rerun()
 else:
     st.info("Add a stock symbol to the watchlist to start tracking.")
