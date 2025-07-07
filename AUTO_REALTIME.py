@@ -18,23 +18,22 @@ if 'input_key' not in st.session_state:
 if 'animation_start' not in st.session_state:
     st.session_state.animation_start = time.time()
 
-# Custom CSS/JavaScript for animated progress ring with countdown
+# Custom CSS/JavaScript for smaller animated progress ring
 st.markdown("""
 <style>
 .progress-container {
     display: flex;
     flex-direction: column;
     align-items: center;
-    margin: 20px 0;
-    background: rgba(0, 0, 0, 0.2);
-    padding: 25px;
-    border-radius: 15px;
-    box-shadow: 0 0 30px rgba(0, 255, 255, 0.4);
+    margin: 15px 0;
+    background: rgba(255, 255, 255, 0.8);
+    padding: 15px;
+    border-radius: 10px;
 }
 .progress-ring {
     position: relative;
-    width: 150px;
-    height: 150px;
+    width: 100px;
+    height: 100px;
 }
 .progress-ring__circle {
     transform: rotate(-90deg);
@@ -46,7 +45,7 @@ st.markdown("""
 }
 @keyframes pulse {
     0% { transform: scale(1) rotate(-90deg); }
-    50% { transform: scale(1.1) rotate(-90deg); }
+    50% { transform: scale(1.05) rotate(-90deg); }
     100% { transform: scale(1) rotate(-90deg); }
 }
 .progress-text {
@@ -54,23 +53,22 @@ st.markdown("""
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    font-size: 24px;
+    font-size: 18px;
     font-weight: bold;
-    color: #ffffff;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+    color: #000000;
 }
 .progress-interval {
-    font-size: 20px;
-    color: #00ffcc;
+    font-size: 16px;
+    color: #000000;
     font-weight: bold;
-    margin-top: 15px;
+    margin-top: 10px;
 }
 body {
-    background: linear-gradient(135deg, #1e3c72, #2a5298);
+    background: linear-gradient(135deg, #e6f3ff, #ffffff);
 }
-.system-time {
-    font-size: 18px;
-    color: #ffffff;
+.system-time, .stock-timestamp, .yfinance-time {
+    font-size: 16px;
+    color: #000000;
     font-weight: bold;
     margin-bottom: 10px;
 }
@@ -79,7 +77,7 @@ body {
 function updateProgressRing(intervalSeconds, startTime) {
     const circle = document.getElementById('progress-circle');
     const text = document.getElementById('progress-text');
-    const circumference = 2 * Math.PI * 60; // Radius = 60
+    const circumference = 2 * Math.PI * 45; // Radius = 45
     circle.style.strokeDasharray = `${circumference} ${circumference}`;
     
     function animate() {
@@ -150,7 +148,7 @@ def create_candlestick_chart(df, symbol):
 st.sidebar.header("Stock Watchlist")
 symbol_input = st.sidebar.text_input("Enter Stock Symbol (e.g., AAPL)", "", key=f"symbol_input_{st.session_state.input_key}").upper()
 interval_options = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600}
-interval = st.sidebar.selectbox("Select Interval", options=list(interval_options.keys()), index=0)
+interval = st.sidebar.selectbox("Select Interval", options=list(interval_options.keys()), index=0, key=f"interval_select_{st.session_state.input_key}")
 if st.sidebar.button("Add to Watchlist"):
     if symbol_input:
         if symbol_input not in st.session_state.watchlist:
@@ -182,9 +180,9 @@ if st.session_state.watchlist:
     st.markdown(f"""
     <div class="progress-container">
         <div class="progress-ring">
-            <svg width="150" height="150">
-                <circle cx="75" cy="75" r="60" stroke="#e0e0e0" stroke-width="12" fill="none"/>
-                <circle id="progress-circle" class="progress-ring__circle" cx="75" cy="75" r="60" stroke="url(#gradient)" stroke-width="12" fill="none"/>
+            <svg width="100" height="100">
+                <circle cx="50" cy="50" r="45" stroke="#e0e0e0" stroke-width="8" fill="none"/>
+                <circle id="progress-circle" class="progress-ring__circle" cx="50" cy="50" r="45" stroke="url(#gradient)" stroke-width="8" fill="none"/>
                 <defs>
                     <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
                         <stop offset="0%" style="stop-color:#3498db;stop-opacity:1"/>
@@ -211,8 +209,8 @@ if st.session_state.watchlist:
             
             if df is not None and info:
                 # Display stock details with timestamps
-                st.markdown(f"<h3 style='color: #ffffff;'>As of {info['timestamp']}</h3>", unsafe_allow_html=True)
-                st.markdown(f"<p style='color: #00ffcc;'>yfinance Time (Local): {info['timestamp']}</p>", unsafe_allow_html=True)
+                st.markdown(f"<div class='stock-timestamp'>As of {info['timestamp']}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='yfinance-time'>yfinance Time (Local): {info['timestamp']}</div>", unsafe_allow_html=True)
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("Current Price", f"${info['price']:.2f}")
@@ -239,7 +237,7 @@ if st.session_state.watchlist:
     # Auto-refresh logic
     current_time = time.time()
     refresh_interval = interval_options[st.session_state.selected_interval]
-    if current_time - st.session_state.last_update >= refresh_interval:
+    if current_time - st.session_state.last_update >= refresh_interval + 1:  # Add buffer to stabilize
         st.session_state.last_update = current_time
         st.session_state.animation_start = current_time
         st.rerun()
