@@ -18,7 +18,7 @@ if 'input_key' not in st.session_state:
 if 'animation_start' not in st.session_state:
     st.session_state.animation_start = time.time()
 
-# Custom CSS/JavaScript for animated progress ring
+# Custom CSS/JavaScript for animated progress ring with countdown
 st.markdown("""
 <style>
 .progress-container {
@@ -26,43 +26,52 @@ st.markdown("""
     flex-direction: column;
     align-items: center;
     margin: 20px 0;
-    background: rgba(0, 0, 0, 0.1);
-    padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+    background: rgba(0, 0, 0, 0.2);
+    padding: 25px;
+    border-radius: 15px;
+    box-shadow: 0 0 30px rgba(0, 255, 255, 0.4);
 }
 .progress-ring {
     position: relative;
-    width: 120px;
-    height: 120px;
+    width: 150px;
+    height: 150px;
 }
 .progress-ring__circle {
     transform: rotate(-90deg);
     transform-origin: 50% 50%;
     transition: stroke-dashoffset 0.1s linear;
 }
+.progress-ring__circle.pulse {
+    animation: pulse 0.5s ease-in-out 2;
+}
+@keyframes pulse {
+    0% { transform: scale(1) rotate(-90deg); }
+    50% { transform: scale(1.1) rotate(-90deg); }
+    100% { transform: scale(1) rotate(-90deg); }
+}
 .progress-text {
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    font-size: 20px;
+    font-size: 24px;
     font-weight: bold;
     color: #ffffff;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
 }
 .progress-interval {
-    font-size: 18px;
+    font-size: 20px;
     color: #00ffcc;
     font-weight: bold;
-    margin-top: 10px;
+    margin-top: 15px;
 }
 body {
     background: linear-gradient(135deg, #1e3c72, #2a5298);
 }
 .system-time {
-    font-size: 16px;
+    font-size: 18px;
     color: #ffffff;
+    font-weight: bold;
     margin-bottom: 10px;
 }
 </style>
@@ -70,7 +79,7 @@ body {
 function updateProgressRing(intervalSeconds, startTime) {
     const circle = document.getElementById('progress-circle');
     const text = document.getElementById('progress-text');
-    const circumference = 2 * Math.PI * 50; // Radius = 50
+    const circumference = 2 * Math.PI * 60; // Radius = 60
     circle.style.strokeDasharray = `${circumference} ${circumference}`;
     
     function animate() {
@@ -79,12 +88,12 @@ function updateProgressRing(intervalSeconds, startTime) {
         const dashOffset = circumference * (1 - progress);
         circle.style.strokeDashoffset = dashOffset;
         text.textContent = Math.ceil(intervalSeconds - elapsed) + 's';
-        if (progress < 1) {
-            requestAnimationFrame(animate);
-        } else {
-            circle.style.strokeDashoffset = circumference; // Reset
-            text.textContent = intervalSeconds + 's';
+        if (progress >= 1) {
+            circle.classList.add('pulse');
+            setTimeout(() => circle.classList.remove('pulse'), 1000);
             setTimeout(() => updateProgressRing(intervalSeconds, Date.now() / 1000), 1000);
+        } else {
+            requestAnimationFrame(animate);
         }
     }
     animate();
@@ -104,7 +113,6 @@ def get_stock_data(symbol, interval, period='1d'):
         low_price = df['Low'].min() if not df.empty else None
         high_price = df['High'].max() if not df.empty else None
         timestamp = df.index[-1]
-        # Convert yfinance timestamp to local system timezone
         local_tz = datetime.now().astimezone().tzinfo
         timestamp_local = timestamp.tz_convert(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
         return df, {
@@ -112,8 +120,7 @@ def get_stock_data(symbol, interval, period='1d'):
             'volume': volume,
             'low': low_price,
             'high': high_price,
-            'timestamp': timestamp_local,
-            'timestamp_original': timestamp
+            'timestamp': timestamp_local
         }
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
@@ -175,9 +182,9 @@ if st.session_state.watchlist:
     st.markdown(f"""
     <div class="progress-container">
         <div class="progress-ring">
-            <svg width="120" height="120">
-                <circle cx="60" cy="60" r="50" stroke="#e0e0e0" stroke-width="10" fill="none"/>
-                <circle id="progress-circle" class="progress-ring__circle" cx="60" cy="60" r="50" stroke="url(#gradient)" stroke-width="10" fill="none"/>
+            <svg width="150" height="150">
+                <circle cx="75" cy="75" r="60" stroke="#e0e0e0" stroke-width="12" fill="none"/>
+                <circle id="progress-circle" class="progress-ring__circle" cx="75" cy="75" r="60" stroke="url(#gradient)" stroke-width="12" fill="none"/>
                 <defs>
                     <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
                         <stop offset="0%" style="stop-color:#3498db;stop-opacity:1"/>
