@@ -5,13 +5,15 @@ import plotly.graph_objects as go
 import time
 from datetime import datetime, timedelta
 
-# Initialize session state for watchlist, last update time, and selected interval
+# Initialize session state
 if 'watchlist' not in st.session_state:
     st.session_state.watchlist = []
 if 'last_update' not in st.session_state:
     st.session_state.last_update = time.time()
 if 'selected_interval' not in st.session_state:
     st.session_state.selected_interval = '1m'
+if 'input_key' not in st.session_state:
+    st.session_state.input_key = 0
 
 # Function to get stock data
 def get_stock_data(symbol, interval, period='1d'):
@@ -58,7 +60,7 @@ def create_candlestick_chart(df, symbol):
 
 # Sidebar for input
 st.sidebar.header("Stock Watchlist")
-symbol_input = st.sidebar.text_input("Enter Stock Symbol (e.g., AAPL)", "").upper()
+symbol_input = st.sidebar.text_input("Enter Stock Symbol (e.g., AAPL)", "", key=f"symbol_input_{st.session_state.input_key}").upper()
 interval_options = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600}
 interval = st.sidebar.selectbox("Select Interval", options=list(interval_options.keys()), index=0)
 if st.sidebar.button("Add to Watchlist"):
@@ -66,6 +68,7 @@ if st.sidebar.button("Add to Watchlist"):
         if symbol_input not in st.session_state.watchlist:
             st.session_state.watchlist.append(symbol_input)
             st.session_state.selected_interval = interval
+            st.session_state.input_key += 1  # Reset input field
             st.sidebar.success(f"{symbol_input} added to watchlist!")
         else:
             st.sidebar.warning(f"{symbol_input} is already in the watchlist!")
@@ -108,10 +111,11 @@ if st.session_state.watchlist:
                 st.error(f"No data available for {symbol}.")
         st.success(f"Data updated at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # Auto-refresh logic
+    # Auto-refresh logic with slight delay
     current_time = time.time()
     refresh_interval = interval_options[st.session_state.selected_interval]
     if current_time - st.session_state.last_update >= refresh_interval:
+        time.sleep(0.5)  # Short delay to stabilize UI
         st.session_state.last_update = current_time
         st.rerun()
 else:
