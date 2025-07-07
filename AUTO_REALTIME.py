@@ -156,8 +156,7 @@ if st.sidebar.button("Add to Watchlist"):
             st.session_state.selected_interval = interval
             st.session_state.input_key += 1  # Increment key only on successful add
             st.session_state.animation_start = time.time()
-            st.sidebar.success(f"{symbol_input} added to watchlist!")
-            st.experimental_rerun()  # Force re-render to update UI
+            st.rerun()  # Use st.rerun() instead of experimental_rerun
         else:
             st.sidebar.warning(f"{symbol_input} is already in the watchlist!")
     else:
@@ -209,7 +208,7 @@ if st.session_state.watchlist:
     if progress >= 1:
         st.session_state.last_update = current_time
         st.session_state.animation_start = current_time
-        st.experimental_rerun()
+        st.rerun()
 
     # Fetch and display data with spinner
     with st.spinner("Fetching stock data..."):
