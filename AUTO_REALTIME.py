@@ -219,7 +219,7 @@ if st.session_state.watchlist:
             
             if df is not None and info:
                 st.markdown(f"<div class='stock-timestamp'>As of {info['timestamp']}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='yfinance-time'>yfinance Time (Local): {info['timestamp']}</div>", unsafe_allow_html=True)
+                # st.markdown(f"<div class='yfinance-time'>yfinance Time (Local): {info['timestamp']}</div>", unsafe_allow_html=True)
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("Current Price", f"${info['price']:.2f}")
