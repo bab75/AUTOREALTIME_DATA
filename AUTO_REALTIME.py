@@ -62,13 +62,13 @@ body {
 # Function to get stock data
 def get_stock_data(symbol, interval, period='1d'):
     try:
-        stock = yf.Ticker(symbol)
+        stock = yfinance.Ticker(symbol)
         df = stock.history(period=period, interval=interval)
         if df.empty:
             st.error(f"No data available for {symbol}")
             return None, None
         current_price = df['Close'].iloc[-1] if not df.empty else None
-        volume = df['Volume'].iloc[-1] if not df.empty else None
+        volume = df['Volume'].iloc[-1] if not df.empty else 0  # Default to 0 if None
         low_price = df['Low'].min() if not df.empty else None
         high_price = df['High'].max() if not df.empty else None
         timestamp = df.index[-1]
@@ -126,7 +126,7 @@ if st.sidebar.button("Add to Watchlist"):
 
 # Dynamic timer in sidebar
 if st.session_state.watchlist:
-    placeholder = st.sidebar.empty()
+    countdown_placeholder = st.sidebar.empty()
     progress_placeholder = st.sidebar.empty()
 
     current_time = time.time()
@@ -135,25 +135,36 @@ if st.session_state.watchlist:
     progress_value = min(elapsed / refresh_interval, 1.0)
     time_remaining = max(0, refresh_interval - elapsed)
 
-    with placeholder.container():
-        st.markdown(f"""
-        <div class="progress-container">
-            <div class="progress-interval">Refresh Interval: {st.session_state.selected_interval}</div>
-            <div class="progress-text">Time until next refresh: {int(time_remaining)}s</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with progress_placeholder.container():
-        st.progress(progress_value)
+    # Update timer and progress in a loop
+    while time_remaining > 0 and not st.session_state.refresh_trigger:
+        current_time = time.time()
+        elapsed = current_time - st.session_state.last_timer_check
+        progress_value = min(elapsed / refresh_interval, 1.0)
+        time_remaining = max(0, refresh_interval - elapsed)
 
-    # Check for refresh trigger
-    if progress_value >= 1.0:
+        with countdown_placeholder.container():
+            st.markdown(f"""
+            <div class="progress-container">
+                <div class="progress-interval">Refresh Interval: {st.session_state.selected_interval}</div>
+                <div class="progress-text">Time until next refresh: {int(time_remaining)}s</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with progress_placeholder.container():
+            st.progress(progress_value)
+
+        time.sleep(1)  # Update every second
+        if st.session_state.get('manual_refresh', False):
+            break
+
+    # Trigger refresh if interval completed or manual refresh requested
+    if progress_value >= 1.0 or st.session_state.get('manual_refresh', False):
         st.session_state.refresh_trigger = True
         st.session_state.last_timer_check = current_time
+        st.session_state.pop('manual_refresh', None)
         st.rerun()
 
     if st.sidebar.button("🔄 Refresh Now"):
-        st.session_state.refresh_trigger = True
-        st.session_state.last_timer_check = current_time
+        st.session_state['manual_refresh'] = True
         st.rerun()
 
 # Main app
@@ -187,7 +198,7 @@ if st.session_state.watchlist:
                         with col3:
                             st.metric("High Price", f"${info['high']:.2f}")
                         with col4:
-                            st.metric("Volume", f"{info['volume']:,}")
+                            st.metric("Volume", f"{info['volume']:,}" if info['volume'] is not None else "N/A")
                         fig = create_candlestick_chart(df, symbol)
                         if fig:
                             st.plotly_chart(fig, use_container_width=True)
