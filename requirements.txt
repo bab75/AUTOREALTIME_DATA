@@ -4,3 +4,4 @@ plotly>=5.24.1
 pandas>=2.2.3
 datetime
 pytz
+numpy>=1.26.0
