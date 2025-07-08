@@ -65,9 +65,10 @@ def get_stock_data(symbol, interval, period='1d'):
         stock = yf.Ticker(symbol)
         df = stock.history(period=period, interval=interval)
         if df.empty:
+            st.error(f"No data available for {symbol}")
             return None, None
-        current_price = df['Close'][-1] if not df.empty else None
-        volume = df['Volume'][-1] if not df.empty else None
+        current_price = df['Close'].iloc[-1] if not df.empty else None
+        volume = df['Volume'].iloc[-1] if not df.empty else None
         low_price = df['Low'].min() if not df.empty else None
         high_price = df['High'].max() if not df.empty else None
         timestamp = df.index[-1]
@@ -116,6 +117,7 @@ if st.sidebar.button("Add to Watchlist"):
             st.session_state.input_key += 1
             st.session_state.last_update = time.time()
             st.session_state.last_timer_check = time.time()
+            st.session_state.refresh_trigger = True  # Trigger initial refresh
             st.rerun()
         else:
             st.sidebar.warning(f"{symbol_input} is already in the watchlist!")
@@ -139,15 +141,14 @@ if st.session_state.watchlist:
         """, unsafe_allow_html=True)
         st.progress(progress_value)
 
-        if progress_value >= 1.0 or st.session_state.get('manual_refresh', False):
+        if progress_value >= 1.0:
             st.session_state.refresh_trigger = True
-            st.session_state.last_update = current_time
             st.session_state.last_timer_check = current_time
-            st.session_state.pop('manual_refresh', None)
             st.rerun()
 
         if st.button("🔄 Refresh Now"):
-            st.session_state['manual_refresh'] = True
+            st.session_state.refresh_trigger = True
+            st.session_state.last_timer_check = current_time
             st.rerun()
 
 # Main app
@@ -186,7 +187,7 @@ if st.session_state.watchlist:
                         if fig:
                             st.plotly_chart(fig, use_container_width=True)
                     else:
-                        st.error(f"No data available for {symbol}.")
+                        st.error(f"Failed to fetch data for {symbol}.")
             st.success(f"✅ Data updated at {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
             st.session_state.refresh_trigger = False
 else:
