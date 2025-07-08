@@ -16,6 +16,9 @@ if 'selected_interval' not in st.session_state:
 if 'input_key' not in st.session_state:
     st.session_state.input_key = 0
 
+# Define interval options
+interval_options = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600}
+
 # Custom CSS for styling
 st.markdown("""
 <style>
@@ -113,7 +116,6 @@ def create_candlestick_chart(df, symbol):
 # Sidebar for input
 st.sidebar.header("Stock Watchlist")
 symbol_input = st.sidebar.text_input("Enter Stock Symbol (e.g., AAPL)", "", key=f"symbol_input_{st.session_state.input_key}").upper()
-interval_options = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600}
 interval = st.sidebar.selectbox("Select Interval", options=list(interval_options.keys()), index=0, key=f"interval_select_{st.session_state.input_key}")
 if st.sidebar.button("Add to Watchlist"):
     if symbol_input:
