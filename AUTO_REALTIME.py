@@ -68,6 +68,7 @@ body {
 .stock-metric {
     font-size: 14px;
     padding: 5px;
+    font-weight: bold;
 }
 </style>
 <script>
@@ -135,7 +136,7 @@ def create_candlestick_chart(df, symbol):
 
 # Sidebar for input
 st.sidebar.header("Stock Watchlist")
-symbol_input = st.sidebar.text_input("Enter Stock Symbol (e.g., AAPL)", "", key=f"symbol_input_{st.session_state.input_key}").upper()
+symbol_input = st.sidebar.text_input("Enter Stock Symbol (e.g., ASML)", "", key=f"symbol_input_{st.session_state.input_key}").upper()
 interval = st.sidebar.selectbox("Select Interval", options=list(interval_options.keys()), index=1, key=f"interval_select_{st.session_state.input_key}")
 if st.sidebar.button("Add to Watchlist"):
     if symbol_input:
@@ -186,7 +187,7 @@ if st.session_state.watchlist:
         st.write(f"- {symbol}")
 
     # Handle refresh request from JavaScript
-    if 'refresh' in st.experimental_get_query_params():
+    if st.query_params.get('refresh'):
         st.session_state.refresh_trigger = True
         st.experimental_rerun()
 
@@ -204,8 +205,6 @@ if st.session_state.watchlist:
                         <div class='stock-timestamp'>Last Updated: {info['timestamp']}</div>
                         <div class='stock-metrics'>
                             <div class='stock-metric'><strong>Current Price:</strong> ${info['price']:.2f}</div>
-                            <div class='stock-metric'><strong>Low Price:</strong> ${info['low']:.2f}</div>
-                            <div class='stock-metric'><strong>High Price:</strong> ${info['high']:.2f}</div>
                             <div class='stock-metric'><strong>Volume:</strong> {info['volume']:,}</div>
                         </div>
                     </div>
