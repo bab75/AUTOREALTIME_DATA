@@ -209,3 +209,6 @@ else:
             
             st.divider()
 
+# Footer
+st.markdown("---")
+st.markdown("🔍 **Data provided by Yahoo Finance** | 📊 **Real-Time Stock Monitoring Dashboard**")
