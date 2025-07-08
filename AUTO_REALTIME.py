@@ -89,7 +89,8 @@ setInterval(refreshData, 300000); // Refresh every 300 seconds (5 minutes)
 # Function to get stock data
 def get_stock_data(symbol, interval, period='1d'):
     try:
-        if symbol not in st.session_state.data_cache or st.session_state.refresh_trigger:
+        # Force refresh if triggered to avoid caching old data
+        if st.session_state.refresh_trigger:
             stock = yf.Ticker(symbol)
             df = stock.history(period=period, interval=interval)
             if df.empty:
