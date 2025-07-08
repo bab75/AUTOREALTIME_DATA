@@ -12,7 +12,7 @@ if 'watchlist' not in st.session_state:
 if 'last_update' not in st.session_state:
     st.session_state.last_update = time.time()
 if 'selected_interval' not in st.session_state:
-    st.session_state.selected_interval = '5m'  # Changed to 5m for testing
+    st.session_state.selected_interval = '5m'
 if 'input_key' not in st.session_state:
     st.session_state.input_key = 0
 if 'refresh_trigger' not in st.session_state:
@@ -108,7 +108,7 @@ def create_candlestick_chart(df, symbol):
 # Sidebar for input and timer
 st.sidebar.header("Stock Watchlist")
 symbol_input = st.sidebar.text_input("Enter Stock Symbol (e.g., AAPL)", "", key=f"symbol_input_{st.session_state.input_key}").upper()
-interval = st.sidebar.selectbox("Select Interval", options=list(interval_options.keys()), index=1, key=f"interval_select_{st.session_state.input_key}")  # Default to 5m
+interval = st.sidebar.selectbox("Select Interval", options=list(interval_options.keys()), index=1, key=f"interval_select_{st.session_state.input_key}")
 if st.sidebar.button("Add to Watchlist"):
     if symbol_input:
         if symbol_input not in st.session_state.watchlist:
@@ -118,7 +118,7 @@ if st.sidebar.button("Add to Watchlist"):
             st.session_state.last_update = time.time()
             st.session_state.last_timer_check = time.time()
             st.session_state.refresh_trigger = True
-            st.rerun()
+            st.experimental_rerun()
         else:
             st.sidebar.warning(f"{symbol_input} is already in the watchlist!")
     else:
@@ -149,12 +149,12 @@ if st.session_state.watchlist:
     if progress_value >= 1.0:
         st.session_state.refresh_trigger = True
         st.session_state.last_timer_check = current_time
-        st.rerun()
+        st.experimental_rerun()
 
     if st.sidebar.button("🔄 Refresh Now"):
         st.session_state.refresh_trigger = True
         st.session_state.last_timer_check = current_time
-        st.rerun()
+        st.experimental_rerun()
 
 # Main app
 st.title("Stock Market Watchlist")
