@@ -19,6 +19,8 @@ if 'refresh_trigger' not in st.session_state:
     st.session_state.refresh_trigger = False
 if 'last_timer_check' not in st.session_state:
     st.session_state.last_timer_check = time.time()
+if 'last_refresh_time' not in st.session_state:
+    st.session_state.last_refresh_time = time.time()
 
 # Define interval options
 interval_options = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600}
@@ -117,6 +119,7 @@ if st.sidebar.button("Add to Watchlist"):
             st.session_state.input_key += 1
             st.session_state.last_update = time.time()
             st.session_state.last_timer_check = time.time()
+            st.session_state.last_refresh_time = time.time()
             st.session_state.refresh_trigger = True
             st.rerun()
         else:
@@ -130,7 +133,7 @@ if st.session_state.watchlist:
     progress_placeholder = st.sidebar.empty()
 
     current_time = time.time()
-    elapsed = current_time - st.session_state.last_timer_check
+    elapsed = current_time - st.session_state.last_refresh_time
     refresh_interval = interval_options[st.session_state.selected_interval]
     progress_value = min(elapsed / refresh_interval, 1.0)
     time_remaining = max(0, refresh_interval - elapsed)
@@ -145,15 +148,15 @@ if st.session_state.watchlist:
     with progress_placeholder.container():
         st.progress(progress_value)
 
-    # Trigger refresh if interval completed or manual refresh requested
-    if progress_value >= 1.0:
+    # Trigger automatic refresh based on interval
+    if elapsed >= refresh_interval:
         st.session_state.refresh_trigger = True
-        st.session_state.last_timer_check = current_time
+        st.session_state.last_refresh_time = current_time
         st.rerun()
 
     if st.sidebar.button("🔄 Refresh Now"):
         st.session_state.refresh_trigger = True
-        st.session_state.last_timer_check = current_time
+        st.session_state.last_refresh_time = current_time
         st.rerun()
 
 # Main app
