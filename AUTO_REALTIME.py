@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
 from datetime import datetime
-import pytz
 import threading
 
 # Initialize session state
@@ -21,11 +20,15 @@ if 'last_refresh_time' not in st.session_state:
     st.session_state.last_refresh_time = time.time()
 if 'refresh_count' not in st.session_state:
     st.session_state.refresh_count = 0
+if 'refresh_status' not in st.session_state:
+    st.session_state.refresh_status = "No refresh attempted"
 
 # Custom functions
 def get_stock_data(symbol, interval, period='1d'):
     try:
         stock = yf.Ticker(symbol)
+        # Adjust period for daily interval to ensure enough data
+        period = '10d' if interval == '1d' else period
         df = stock.history(period=period, interval=interval)
         if df.empty or len(df) < 2:
             st.error(f"No sufficient data for {symbol} with interval {interval}")
@@ -35,8 +38,8 @@ def get_stock_data(symbol, interval, period='1d'):
         current_volume = df['Volume'].iloc[-1]
         previous_volume = df['Volume'].iloc[-2]
         timestamp = df.index[-1]
-        local_tz = datetime.now().astimezone().tzinfo
-        timestamp_local = timestamp.tz_convert(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
+        system_tz = datetime.now().astimezone().tzinfo
+        timestamp_system = timestamp.tz_convert(system_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
         change_pct = ((current_price - previous_price) / previous_price) * 100
         volume_change_pct = ((current_volume - previous_volume) / previous_volume) * 100 if previous_volume > 0 else 0
         return {
@@ -48,7 +51,7 @@ def get_stock_data(symbol, interval, period='1d'):
             'low': df['Low'].iloc[-1],
             'change_pct': change_pct,
             'volume_change_pct': volume_change_pct,
-            'timestamp': timestamp_local
+            'timestamp': timestamp_system
         }
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
@@ -91,7 +94,8 @@ st.set_page_config(
 # Real-time clock
 def display_clock():
     while True:
-        current_time = datetime.now().astimezone(pytz.timezone('US/Eastern')).strftime('%Y-%m-%d %H:%M:%S %Z')
+        system_tz = datetime.now().astimezone().tzinfo
+        current_time = datetime.now().astimezone(system_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
         clock_placeholder.markdown(f"<div style='position: absolute; top: 10px; right: 10px; font-size: 16px; font-weight: bold;'>Clock: {current_time}</div>", unsafe_allow_html=True)
         time.sleep(1)
 
@@ -187,19 +191,24 @@ with st.sidebar:
                     st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
             st.session_state.last_refresh_time = time.time()
             st.session_state.refresh_count += 1
+            st.session_state.refresh_status = "Manual refresh successful"
+            print("Manual refresh completed successfully")
         st.success("✅ All stocks refreshed!")
         st.rerun()
 
     if st.button("🗑️ Clear All Stocks", type="secondary"):
         st.session_state.watchlist = {}
+        st.session_state.refresh_status = "Watchlist cleared"
+        print("Watchlist cleared")
         st.success("✅ All stocks cleared!")
         st.rerun()
     
     # Refresh Status
     st.subheader("🔄 Refresh Status")
     st.markdown(f"**Auto-Refresh Enabled:** {'Yes' if st.session_state.auto_refresh else 'No'}")
-    st.markdown(f"**Last Refresh:** {datetime.fromtimestamp(st.session_state.last_refresh_time).strftime('%Y-%m-%d %H:%M:%S %Z') if st.session_state.last_refresh_time else 'N/A'}")
+    st.markdown(f"**Last Refresh:** {datetime.fromtimestamp(st.session_state.last_refresh_time).astimezone().strftime('%Y-%m-%d %H:%M:%S %Z') if st.session_state.last_refresh_time else 'N/A'}")
     st.markdown(f"**Refresh Count:** {st.session_state.refresh_count}")
+    st.markdown(f"**Status:** {st.session_state.refresh_status}")
     
     # Volume Trend Selection
     st.subheader("📈 Volume Trend")
@@ -214,6 +223,8 @@ if st.session_state.auto_refresh:
     current_time = time.time()
     if current_time - st.session_state.last_refresh_time >= st.session_state.refresh_interval:
         with st.spinner("🔄 Auto-refreshing stock data..."):
+            print(f"Attempting auto-refresh at {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            refresh_success = True
             for symbol in list(st.session_state.watchlist.keys()):
                 data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'])
                 if data is not None:
@@ -226,8 +237,12 @@ if st.session_state.auto_refresh:
                     st.session_state.watchlist[symbol]['low'] = data['low']
                     st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
                     st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
+                else:
+                    refresh_success = False
             st.session_state.last_refresh_time = current_time
             st.session_state.refresh_count += 1
+            st.session_state.refresh_status = "Auto-refresh successful" if refresh_success else "Auto-refresh failed for some stocks"
+            print(f"Auto-refresh {'successful' if refresh_success else 'failed'} at {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
         st.rerun()
 
 # Main content area
@@ -274,50 +289,46 @@ if st.session_state.watchlist:
     symbols = list(st.session_state.watchlist.keys())
     changes = [st.session_state.watchlist[symbol]['change_pct'] for symbol in symbols]
     
-    st.markdown("""
-        <canvas id="portfolioChart"></canvas>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        <script>
-            const ctx = document.getElementById('portfolioChart').getContext('2d');
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: """ + str(symbols) + """,
-                    datasets: [{
-                        label: 'Percentage Change (%)',
-                        data: """ + str(changes) + """,
-                        backgroundColor: """ + str(["#4CAF50" if change >= 0 else "#F44336" for change in changes]) + """,
-                        borderColor: """ + str(["#388E3C" if change >= 0 else "#D32F2F" for change in changes]) + """,
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    scales: {
-                        y: {
-                            title: {
-                                display: true,
-                                text: 'Percentage Change (%)'
-                            },
-                            beginAtZero: true
-                        },
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Stocks'
-                            }
-                        }
+    ```chartjs
+    {
+        "type": "bar",
+        "data": {
+            "labels": symbols,
+            "datasets": [{
+                "label": "Percentage Change (%)",
+                "data": changes,
+                "backgroundColor": ["#4CAF50" if change >= 0 else "#F44336" for change in changes],
+                "borderColor": ["#388E3C" if change >= 0 else "#D32F2F" for change in changes],
+                "borderWidth": 1
+            }]
+        },
+        "options": {
+            "scales": {
+                "y": {
+                    "title": {
+                        "display": true,
+                        "text": "Percentage Change (%)"
                     },
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        title: {
-                            display: true,
-                            text: 'Portfolio Performance'
-                        }
+                    "beginAtZero": true
+                },
+                "x": {
+                    "title": {
+                        "display": true,
+                        "text": "Stocks"
                     }
                 }
-            });
+            },
+            "plugins": {
+                "legend": {
+                    "display": false
+                },
+                "title": {
+                    "display": true,
+                    "text": "Portfolio Performance"
+                }
+            }
+        }
+             });
         </script>
     """, unsafe_allow_html=True)
 
