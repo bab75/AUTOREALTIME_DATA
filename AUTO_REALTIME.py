@@ -62,7 +62,9 @@ def create_candlestick_chart(df, symbol, interval):
                                     name=symbol),
                      row=1, col=1)
         
-        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume', marker_color='blue'), row=2, col=1)
+        # Color volume bars based on change from previous period
+        colors = ['green' if df['Volume'].iloc[i] >= df['Volume'].iloc[max(0, i-1)] else 'red' for i in range(len(df))]
+        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume', marker_color=colors), row=2, col=1)
         
         fig.update_layout(
             title=f"{symbol} Candlestick Chart ({interval})",
@@ -190,12 +192,12 @@ else:
                 </div>
             """, unsafe_allow_html=True)
             
-            # Metrics in vertical layout with colored volume
+            # Metrics in vertical layout
             st.metric("📈 Open", f"${stock_info['open']:.2f}")
             st.metric("📊 High", f"${stock_info['high']:.2f}")
             st.metric("📉 Low", f"${stock_info['low']:.2f}")
             st.markdown(f"""
-                <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['volume_change_pct'] >= 0 else 'red'};">
+                <div style="font-size: 16px; font-weight: bold;">
                     📦 Volume: {int(stock_info['volume']):,}
                 </div>
             """, unsafe_allow_html=True)
