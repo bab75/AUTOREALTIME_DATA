@@ -16,9 +16,11 @@ if 'last_update' not in st.session_state:
 if 'auto_refresh' not in st.session_state:
     st.session_state.auto_refresh = False
 if 'refresh_interval' not in st.session_state:
-    st.session_state.refresh_interval = 60  # Default to 60 seconds
+    st.session_state.refresh_interval = 60
 if 'last_refresh_time' not in st.session_state:
     st.session_state.last_refresh_time = time.time()
+if 'refresh_count' not in st.session_state:
+    st.session_state.refresh_count = 0
 
 # Custom functions
 def get_stock_data(symbol, interval, period='1d'):
@@ -112,9 +114,10 @@ with st.sidebar:
     )
     
     interval_options = {
-        "1m": "1M", "2m": "2M", "5m": "5M",
-        "15m": "15M", "30m": "30M", "1h": "1H",
-        "2h": "2H", "4h": "4H"
+        "1m": "1 Minute", "2m": "2 Minutes", "5m": "5 Minutes",
+        "15m": "15 Minutes", "30m": "30 Minutes", "60m": "60 Minutes",
+        "90m": "90 Minutes", "1h": "1 Hour", "1d": "1 Day",
+        "5d": "5 Days", "1wk": "1 Week", "1mo": "1 Month"
     }
     selected_interval = st.selectbox(
         "Select Chart Time Interval",
@@ -182,14 +185,29 @@ with st.sidebar:
                     st.session_state.watchlist[symbol]['low'] = data['low']
                     st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
                     st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
-            st.success("✅ All stocks refreshed!")
             st.session_state.last_refresh_time = time.time()
+            st.session_state.refresh_count += 1
+        st.success("✅ All stocks refreshed!")
         st.rerun()
 
     if st.button("🗑️ Clear All Stocks", type="secondary"):
         st.session_state.watchlist = {}
         st.success("✅ All stocks cleared!")
         st.rerun()
+    
+    # Refresh Status
+    st.subheader("🔄 Refresh Status")
+    st.markdown(f"**Auto-Refresh Enabled:** {'Yes' if st.session_state.auto_refresh else 'No'}")
+    st.markdown(f"**Last Refresh:** {datetime.fromtimestamp(st.session_state.last_refresh_time).strftime('%Y-%m-%d %H:%M:%S %Z') if st.session_state.last_refresh_time else 'N/A'}")
+    st.markdown(f"**Refresh Count:** {st.session_state.refresh_count}")
+    
+    # Volume Trend Selection
+    st.subheader("📈 Volume Trend")
+    selected_volume_stock = st.selectbox(
+        "Select Stock for Volume Trend",
+        options=list(st.session_state.watchlist.keys()) if st.session_state.watchlist else ["No stocks available"],
+        help="Select a stock to view its volume trend"
+    )
 
 # Auto-refresh logic
 if st.session_state.auto_refresh:
@@ -209,6 +227,7 @@ if st.session_state.auto_refresh:
                     st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
                     st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
             st.session_state.last_refresh_time = current_time
+            st.session_state.refresh_count += 1
         st.rerun()
 
 # Main content area
@@ -246,6 +265,118 @@ else:
                 st.warning("No data available for chart")
             
             st.divider()
+
+# Portfolio Performance Overview
+if st.session_state.watchlist:
+    st.subheader("📊 Portfolio Performance Overview")
+    st.markdown("Percentage change for all stocks in the watchlist")
+    
+    symbols = list(st.session_state.watchlist.keys())
+    changes = [st.session_state.watchlist[symbol]['change_pct'] for symbol in symbols]
+    
+    st.markdown("""
+        <canvas id="portfolioChart"></canvas>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script>
+            const ctx = document.getElementById('portfolioChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: """ + str(symbols) + """,
+                    datasets: [{
+                        label: 'Percentage Change (%)',
+                        data: """ + str(changes) + """,
+                        backgroundColor: """ + str(["#4CAF50" if change >= 0 else "#F44336" for change in changes]) + """,
+                        borderColor: """ + str(["#388E3C" if change >= 0 else "#D32F2F" for change in changes]) + """,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Percentage Change (%)'
+                            },
+                            beginAtZero: true
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Stocks'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        title: {
+                            display: true,
+                            text: 'Portfolio Performance'
+                        }
+                    }
+                }
+            });
+        </script>
+    """, unsafe_allow_html=True)
+
+# Volume Trend Analysis
+if st.session_state.watchlist and selected_volume_stock in st.session_state.watchlist:
+    st.subheader(f"📈 Volume Trend for {selected_volume_stock}")
+    st.markdown("Volume over the last 10 periods")
+    
+    df = st.session_state.watchlist[selected_volume_stock]['data']
+    volume_data = df['Volume'].tail(10).tolist()
+    labels = df.index[-10:].strftime('%Y-%m-%d %H:%M').tolist()
+    
+    st.markdown("""
+        <canvas id="volumeChart"></canvas>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script>
+            const ctxVolume = document.getElementById('volumeChart').getContext('2d');
+            new Chart(ctxVolume, {
+                type: 'line',
+                data: {
+                    labels: """ + str(labels) + """,
+                    datasets: [{
+                        label: 'Volume',
+                        data: """ + str(volume_data) + """,
+                        borderColor: '#2196F3',
+                        backgroundColor: 'rgba(33, 150, 243, 0.2)',
+                        fill: true,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Volume'
+                            },
+                            beginAtZero: true
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true
+                        },
+                        title: {
+                            display: true,
+                            text: 'Volume Trend'
+                        }
+                    }
+                }
+            });
+        </script>
+    """, unsafe_allow_html=True)
 
 # Footer
 st.markdown("---")
