@@ -53,20 +53,7 @@ body {
     margin-bottom: 10px;
 }
 </style>
-<script>
-// Auto-refresh page based on interval
-function startAutoRefresh(intervalSeconds) {
-    setTimeout(function() {
-        window.location.reload();
-    }, intervalSeconds * 1000);
-}
-// Start auto-refresh if watchlist exists
-if (document.querySelector('.stock-timestamp')) {
-    const interval = %d;
-    startAutoRefresh(interval);
-}
-</script>
-""" % interval_options.get(st.session_state.selected_interval, 60), unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 # Function to get stock data
 def get_stock_data(symbol, interval, period='1d'):
@@ -143,51 +130,50 @@ if st.session_state.watchlist:
     for symbol in st.session_state.watchlist:
         st.write(f"- {symbol}")
 
-    # Calculate progress for native Streamlit progress bar
+    # Dynamic countdown and progress bar
+    progress_placeholder = st.empty()
+    countdown_placeholder = st.empty()
+
     current_time = time.time()
     elapsed = current_time - st.session_state.last_update
     refresh_interval = interval_options[st.session_state.selected_interval]
     progress_value = min(elapsed / refresh_interval, 1.0)
-    
-    # Display countdown info
     time_remaining = max(0, refresh_interval - elapsed)
-    st.markdown(f"""
-    <div class="progress-container">
-        <div class="progress-interval">Refresh Interval: {st.session_state.selected_interval}</div>
-        <div class="progress-text">Time until next refresh: {int(time_remaining)}s</div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Native Streamlit progress bar
-    progress_bar = st.progress(progress_value)
-    
+
+    # Update UI in real-time
+    while time_remaining > 0:
+        current_time = time.time()
+        elapsed = current_time - st.session_state.last_update
+        progress_value = min(elapsed / refresh_interval, 1.0)
+        time_remaining = max(0, refresh_interval - elapsed)
+
+        with progress_placeholder.container():
+            st.progress(progress_value)
+        with countdown_placeholder.container():
+            st.markdown(f"""
+            <div class="progress-container">
+                <div class="progress-interval">Refresh Interval: {st.session_state.selected_interval}</div>
+                <div class="progress-text">Time until next refresh: {int(time_remaining)}s</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        time.sleep(1)  # Update every second
+        if st.session_state.get('manual_refresh', False):
+            break
+
     # Auto-refresh logic
-    if progress_value >= 1.0:
+    if progress_value >= 1.0 or st.session_state.get('manual_refresh', False):
         st.session_state.last_update = current_time
+        st.session_state.pop('manual_refresh', None)
         st.success("🔄 Refreshing data...")
         time.sleep(0.5)
-        st.rerun()
-
-    # Auto-refresh mechanism
-    placeholder = st.empty()
-    
-    # Display refresh countdown
-    if time_remaining > 0:
-        with placeholder.container():
-            st.info(f"⏱️ Next refresh in {int(time_remaining)} seconds")
-            if time_remaining <= 1:
-                time.sleep(1)
-                st.session_state.last_update = time.time()
-                st.rerun()
-    else:
-        st.session_state.last_update = time.time()
         st.rerun()
 
     # Manual refresh button
     col1, col2 = st.columns([3, 1])
     with col2:
         if st.button("🔄 Refresh Now"):
-            st.session_state.last_update = time.time()
+            st.session_state['manual_refresh'] = True
             st.rerun()
 
     # Fetch and display data with real-time updates
