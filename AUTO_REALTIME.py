@@ -23,25 +23,34 @@ def get_stock_data(symbol, interval, period='1d'):
     try:
         stock = yf.Ticker(symbol)
         df = stock.history(period=period, interval=interval)
-        if df.empty:
-            st.error(f"No data available for {symbol} with interval {interval}")
+        if df.empty or len(df) < 2:
+            st.error(f"No sufficient data for {symbol} with interval {interval}")
             return None
         current_price = df['Close'].iloc[-1]
+        previous_price = df['Close'].iloc[-2]
         volume = df['Volume'].iloc[-1]
         timestamp = df.index[-1]
         local_tz = datetime.now().astimezone().tzinfo
         timestamp_local = timestamp.tz_convert(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
-        return {'data': df, 'price': current_price, 'volume': volume, 'open': df['Open'].iloc[-1], 'high': df['High'].iloc[-1], 'low': df['Low'].iloc[-1], 'timestamp': timestamp_local}
+        change_pct = ((current_price - previous_price) / previous_price) * 100
+        return {
+            'data': df,
+            'price': current_price,
+            'volume': volume,
+            'open': df['Open'].iloc[-1],
+            'high': df['High'].iloc[-1],
+            'low': df['Low'].iloc[-1],
+            'change_pct': change_pct,
+            'timestamp': timestamp_local
+        }
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
         return None
 
 def create_candlestick_chart(df, symbol, interval):
     if df is not None and not df.empty:
-        # Create subplot with candlestick and volume
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, subplot_titles=('Candlestick', 'Volume'), row_heights=[0.7, 0.3])
         
-        # Candlestick trace
         fig.add_trace(go.Candlestick(x=df.index,
                                     open=df['Open'],
                                     high=df['High'],
@@ -50,7 +59,6 @@ def create_candlestick_chart(df, symbol, interval):
                                     name=symbol),
                      row=1, col=1)
         
-        # Volume trace
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume', marker_color='blue'), row=2, col=1)
         
         fig.update_layout(
@@ -88,14 +96,12 @@ st.markdown("Track multiple stocks with interactive candlestick charts and real-
 with st.sidebar:
     st.header("⚙️ Controls")
     
-    # Stock symbol input
     symbol_input = st.text_input(
         "Enter Stock Symbol (e.g., ASML)",
         placeholder="e.g., ASML",
         help="Enter a valid stock symbol"
     )
     
-    # Time interval selection
     interval_options = {
         "1m": "1 Minute", "2m": "2 Minutes", "5m": "5 Minutes",
         "15m": "15 Minutes", "30m": "30 Minutes", "60m": "60 Minutes",
@@ -106,11 +112,10 @@ with st.sidebar:
         "Select Chart Time Interval",
         options=list(interval_options.keys()),
         format_func=lambda x: interval_options[x],
-        index=2,  # Default to 5m
+        index=2,
         help="Each candle represents this time period"
     )
     
-    # Submit button
     if st.button("📊 Add to Watchlist", type="primary"):
         if symbol_input:
             symbol = symbol_input.upper().strip()
@@ -125,7 +130,8 @@ with st.sidebar:
                         'volume': data['volume'],
                         'open': data['open'],
                         'high': data['high'],
-                        'low': data['low']
+                        'low': data['low'],
+                        'change_pct': data['change_pct']
                     }
                     st.success(f"✅ Added {symbol} to watchlist!")
                     st.rerun()
@@ -136,7 +142,6 @@ with st.sidebar:
         else:
             st.error("❌ Please enter a stock symbol")
 
-    # Auto-refresh button
     if st.button("🔄 Refresh All", key="refresh_all"):
         st.session_state.auto_refresh = True
         with st.spinner("🔄 Refreshing stock data..."):
@@ -150,10 +155,10 @@ with st.sidebar:
                     st.session_state.watchlist[symbol]['open'] = data['open']
                     st.session_state.watchlist[symbol]['high'] = data['high']
                     st.session_state.watchlist[symbol]['low'] = data['low']
+                    st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
             st.success("✅ All stocks refreshed!")
         st.rerun()
 
-    # Clear all button
     if st.button("🗑️ Clear All Stocks", type="secondary"):
         st.session_state.watchlist = {}
         st.success("✅ All stocks cleared!")
@@ -167,44 +172,31 @@ else:
         with st.container():
             st.subheader(f"📊 {symbol}")
             
-            # Stock information and chart
-            col1, col2 = st.columns([1, 3])
+            # Stock information
+            st.markdown(f"**Last Updated:** {stock_info['last_update']}")
             
-            with col1:
-                # Display timestamp
-                st.markdown(f"**Last Updated:** {stock_info['last_update']}")
-                
-                # Custom HTML for price and volume layout
-                st.markdown(f"""
-                    <div style="position: relative; min-height: 60px;">
-                        <div style="position: absolute; top: 0; right: 0; text-align: right;">
-                            <div style="font-size: 18px; font-weight: bold;">Current Price: ${stock_info['price']:.2f}</div>
-                            <div style="font-size: 16px; font-weight: bold;">Volume: {stock_info['volume']:,}</div>
-                        </div>
+            # Price and change at top right
+            st.markdown(f"""
+                <div style="position: relative; min-height: 60px;">
+                    <div style="position: absolute; top: 0; right: 0; text-align: right;">
+                        <div style="font-size: 18px; font-weight: bold;">Current Price: ${stock_info['price']:.2f}</div>
+                        <div style="font-size: 16px; font-weight: bold;">Change: {stock_info['change_pct']:+.2f}%</div>
                     </div>
-                """, unsafe_allow_html=True)
-                
-                # Display open, high, low, volume in two columns
-                col_left, col_right = st.columns(2)
-                with col_left:
-                    st.metric("📈 Open", f"${stock_info['open']:.2f}")
-                    st.metric("📊 High", f"${stock_info['high']:.2f}")
-                with col_right:
-                    st.metric("📉 Low", f"${stock_info['low']:.2f}")
-                    st.metric("📦 Volume", f"{int(stock_info['volume']):,}")
-                
-                # Remove button
-                if st.button(f"❌ Remove {symbol}", key=f"remove_{symbol}"):
-                    del st.session_state.watchlist[symbol]
-                    st.success(f"✅ {symbol} removed from watchlist!")
-                    st.rerun()
+                </div>
+            """, unsafe_allow_html=True)
             
-            with col2:
-                fig = create_candlestick_chart(stock_info['data'], symbol, stock_info['interval'])
-                if fig:
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("No data available for chart")
+            # Metrics in vertical layout
+            st.metric("📈 Open", f"${stock_info['open']:.2f}")
+            st.metric("📊 High", f"${stock_info['high']:.2f}")
+            st.metric("📉 Low", f"${stock_info['low']:.2f}")
+            st.metric("📦 Volume", f"{int(stock_info['volume']):,}")
+            
+            # Chart below stock data
+            fig = create_candlestick_chart(stock_info['data'], symbol, stock_info['interval'])
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No data available for chart")
             
             st.divider()
 
