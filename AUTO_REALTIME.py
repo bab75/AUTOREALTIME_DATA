@@ -39,7 +39,7 @@ def get_stock_data(symbol, interval, period='1d'):
         current_volume = df['Volume'].iloc[-1]
         previous_volume = df['Volume'].iloc[-2]
         timestamp = df.index[-1]
-        local_tz = datetime.now().astimezone().tzinfo
+        local_tz = pytz.timezone('America/New_York')
         timestamp_local = timestamp.tz_convert(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
         change_pct = ((current_price - previous_price) / previous_price) * 100
         volume_change_pct = ((current_volume - previous_volume) / previous_volume) * 100 if previous_volume > 0 else 0
@@ -95,8 +95,8 @@ st.set_page_config(
 # Real-time clock
 def display_clock():
     while True:
-        local_tz = datetime.now().astimezone().tzinfo
-        current_time = datetime.now().astimezone(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
+        local_tz = pytz.timezone('America/New_York')
+        current_time = datetime.now(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
         clock_placeholder.markdown(f"<div style='position: absolute; top: 10px; right: 10px; font-size: 16px; font-weight: bold;'>Clock: {current_time}</div>", unsafe_allow_html=True)
         time.sleep(1)
 
@@ -192,7 +192,8 @@ with st.sidebar:
                     st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
             st.session_state.last_refresh_time = time.time()
             st.session_state.refresh_count += 1
-            st.session_state.debug_message = f"Manual refresh at {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}"
+            st.session_state.debug_message = f"Manual refresh at {datetime.now(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M:%S %Z')}"
+            print(st.session_state.debug_message)  # Console log
         st.success("✅ All stocks refreshed!")
         st.rerun()
 
@@ -204,7 +205,7 @@ with st.sidebar:
     # Refresh Status
     st.subheader("🔄 Refresh Status")
     st.markdown(f"**Auto-Refresh Enabled:** {'Yes' if st.session_state.auto_refresh else 'No'}")
-    st.markdown(f"**Last Refresh:** {datetime.fromtimestamp(st.session_state.last_refresh_time).astimezone().strftime('%Y-%m-%d %H:%M:%S %Z') if st.session_state.last_refresh_time else 'N/A'}")
+    st.markdown(f"**Last Refresh:** {datetime.fromtimestamp(st.session_state.last_refresh_time).astimezone(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M:%S %Z') if st.session_state.last_refresh_time else 'N/A'}")
     st.markdown(f"**Refresh Count:** {st.session_state.refresh_count}")
     st.markdown(f"**Debug:** {st.session_state.debug_message}")
     
@@ -224,7 +225,11 @@ if st.session_state.auto_refresh:
         with st.spinner("🔄 Auto-refreshing stock data..."):
             any_data_updated = False
             for symbol in list(st.session_state.watchlist.keys()):
+                # Retry once on failure
                 data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'])
+                if data is None:
+                    time.sleep(1)  # Brief pause before retry
+                    data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'])
                 if data is not None:
                     st.session_state.watchlist[symbol]['data'] = data['data']
                     st.session_state.watchlist[symbol]['last_update'] = data['timestamp']
@@ -239,22 +244,24 @@ if st.session_state.auto_refresh:
             if any_data_updated:
                 st.session_state.last_refresh_time = current_time
                 st.session_state.refresh_count += 1
-                st.session_state.debug_message = f"Auto-refresh successful at {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}"
+                st.session_state.debug_message = f"Auto-refresh successful at {datetime.now(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M:%S %Z')}"
             else:
-                st.session_state.debug_message = f"Auto-refresh at {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')} failed: No data updated"
+                st.session_state.debug_message = f"Auto-refresh at {datetime.now(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M:%S %Z')} failed: No data updated"
+            print(st.session_state.debug_message)  # Console log
         st.rerun()
     else:
-        st.session_state.debug_message = f"Auto-refresh check at {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}: {st.session_state.refresh_interval - time_elapsed:.2f} seconds remaining"
+        st.session_state.debug_message = f"Auto-refresh check at {datetime.now(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M:%S %Z')}: {st.session_state.refresh_interval - time_elapsed:.2f} seconds remaining"
+        print(st.session_state.debug_message)  # Console log
 
 # Main content area
 if not st.session_state.watchlist:
-    st.info("Please add stocks to your watchlist using the sidebar to get started!")
+    st.info("📝 Add stocks to your watchlist using the sidebar to get started!")
 else:
     for symbol, stock_info in st.session_state.watchlist.items():
         with st.container():
             st.subheader(f"📊 {symbol}")
             
-            st.markdown(f"**Last Update:** {stock_info['last_update']}")
+            st.markdown(f"**Last Updated:** {stock_info['last_update']}")
             
             st.markdown(f"""
                 <div style="position: relative; min-height: 60px;">
@@ -263,7 +270,7 @@ else:
                         <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['change_pct'] >= 0 else 'red'};">Change: {stock_info['change_pct']:+.2f}%</div>
                     </div>
                 </div>
-            """, unsafe_html=True)
+            """, unsafe_allow_html=True)
             
             st.metric("📈 Open", f"${stock_info['open']:.2f}")
             st.metric("📊 High", f"${stock_info['high']:.2f}")
@@ -272,7 +279,7 @@ else:
                 <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['volume_change_pct'] >= 0 else 'red'};">
                     📦 Volume: {int(stock_info['volume']):,}
                 </div>
-            """, unsafe_html=True)
+            """, unsafe_allow_html=True)
             
             fig = create_candlestick_chart(stock_info['data'], symbol, stock_info['interval'])
             if fig:
@@ -335,7 +342,7 @@ if st.session_state.watchlist:
                 }
             });
         </script>
-    """, unsafe_html=True)
+    """, unsafe_allow_html=True)
 
 # Volume Trend Analysis
 if st.session_state.watchlist and selected_volume_stock in st.session_state.watchlist:
@@ -345,7 +352,7 @@ if st.session_state.watchlist and selected_volume_stock in st.session_state.watc
     df = st.session_state.watchlist[selected_volume_stock]['data']
     if len(df) >= 2:
         volume_data = df['Volume'].tail(10).tolist()
-        labels = df.index[-10:].strftime('%Y-%m-%d %H:%M').tolist()
+        labels = df.index[-10:].tz_convert(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M').tolist()
         
         st.markdown("""
             <canvas id="volumeChart"></canvas>
@@ -393,10 +400,10 @@ if st.session_state.watchlist and selected_volume_stock in st.session_state.watc
                     }
                 });
             </script>
-        """, unsafe_html=True)
+        """, unsafe_allow_html=True)
     else:
         st.warning("Not enough data for volume trend chart (minimum 2 periods required)")
 
 # Footer
 st.markdown("---")
-st.markdown("🔍 **Data provided by Yahoo Finance** | 📊 **Real-Time Stock Dashboard**")
+st.markdown("🔍 **Data provided by Yahoo Finance** | 📊 **Real-Time Stock Monitoring Dashboard**")
