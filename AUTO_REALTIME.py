@@ -15,6 +15,8 @@ if 'selected_interval' not in st.session_state:
     st.session_state.selected_interval = '1m'
 if 'input_key' not in st.session_state:
     st.session_state.input_key = 0
+if 'refresh_trigger' not in st.session_state:
+    st.session_state.refresh_trigger = False
 
 # Define interval options
 interval_options = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600}
@@ -100,7 +102,7 @@ def create_candlestick_chart(df, symbol):
         return fig
     return None
 
-# Sidebar for input
+# Sidebar for input and timer
 st.sidebar.header("Stock Watchlist")
 symbol_input = st.sidebar.text_input("Enter Stock Symbol (e.g., AAPL)", "", key=f"symbol_input_{st.session_state.input_key}").upper()
 interval = st.sidebar.selectbox("Select Interval", options=list(interval_options.keys()), index=0, key=f"interval_select_{st.session_state.input_key}")
@@ -117,6 +119,33 @@ if st.sidebar.button("Add to Watchlist"):
     else:
         st.sidebar.error("Please enter a valid stock symbol.")
 
+# Add countdown and progress bar to sidebar
+if st.session_state.watchlist:
+    current_time = time.time()
+    elapsed = current_time - st.session_state.last_update
+    refresh_interval = interval_options[st.session_state.selected_interval]
+    progress_value = min(elapsed / refresh_interval, 1.0)
+    time_remaining = max(0, refresh_interval - elapsed)
+
+    with st.sidebar:
+        st.markdown(f"""
+        <div class="progress-container">
+            <div class="progress-interval">Refresh Interval: {st.session_state.selected_interval}</div>
+            <div class="progress-text">Time until next refresh: {int(time_remaining)}s</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.progress(progress_value)
+
+        if progress_value >= 1.0:
+            st.session_state.refresh_trigger = True
+            st.session_state.last_update = current_time
+            st.rerun()
+
+        if st.button("🔄 Refresh Now"):
+            st.session_state.refresh_trigger = True
+            st.session_state.last_update = current_time
+            st.rerun()
+
 # Main app
 st.title("Stock Market Watchlist")
 
@@ -130,86 +159,31 @@ if st.session_state.watchlist:
     for symbol in st.session_state.watchlist:
         st.write(f"- {symbol}")
 
-    # Dynamic countdown and progress bar
-    progress_placeholder = st.empty()
-    countdown_placeholder = st.empty()
-
-    current_time = time.time()
-    elapsed = current_time - st.session_state.last_update
-    refresh_interval = interval_options[st.session_state.selected_interval]
-    progress_value = min(elapsed / refresh_interval, 1.0)
-    time_remaining = max(0, refresh_interval - elapsed)
-
-    # Update UI in real-time
-    while time_remaining > 0:
-        current_time = time.time()
-        elapsed = current_time - st.session_state.last_update
-        progress_value = min(elapsed / refresh_interval, 1.0)
-        time_remaining = max(0, refresh_interval - elapsed)
-
-        with progress_placeholder.container():
-            st.progress(progress_value)
-        with countdown_placeholder.container():
-            st.markdown(f"""
-            <div class="progress-container">
-                <div class="progress-interval">Refresh Interval: {st.session_state.selected_interval}</div>
-                <div class="progress-text">Time until next refresh: {int(time_remaining)}s</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        time.sleep(1)  # Update every second
-        if st.session_state.get('manual_refresh', False):
-            break
-
-    # Auto-refresh logic
-    if progress_value >= 1.0 or st.session_state.get('manual_refresh', False):
-        st.session_state.last_update = current_time
-        st.session_state.pop('manual_refresh', None)
-        st.success("🔄 Refreshing data...")
-        time.sleep(0.5)
-        st.rerun()
-
-    # Manual refresh button
-    col1, col2 = st.columns([3, 1])
-    with col2:
-        if st.button("🔄 Refresh Now"):
-            st.session_state['manual_refresh'] = True
-            st.rerun()
-
-    # Fetch and display data with real-time updates
-    with st.spinner("Fetching stock data..."):
-        for i, symbol in enumerate(st.session_state.watchlist):
-            st.subheader(f"Stock: {symbol}")
-            
-            # Create placeholder for dynamic updates
-            data_placeholder = st.empty()
-            
-            with data_placeholder.container():
-                df, info = get_stock_data(symbol, st.session_state.selected_interval)
-                
-                if df is not None and info:
-                    st.markdown(f"<div class='stock-timestamp'>Last Updated: {info['timestamp']}</div>", unsafe_allow_html=True)
-                    
-                    # Display metrics
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Current Price", f"${info['price']:.2f}")
-                    with col2:
-                        st.metric("Low Price", f"${info['low']:.2f}")
-                    with col3:
-                        st.metric("High Price", f"${info['high']:.2f}")
-                    with col4:
-                        st.metric("Volume", f"{info['volume']:,}")
-                    
-                    # Display chart
-                    fig = create_candlestick_chart(df, symbol)
-                    if fig:
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.error(f"No data available for {symbol}.")
-        
-        # Display last update time
-        st.success(f"✅ Data updated at {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
-
+    # Refresh data if triggered
+    if st.session_state.refresh_trigger:
+        with st.spinner("Fetching stock data..."):
+            for i, symbol in enumerate(st.session_state.watchlist):
+                st.subheader(f"Stock: {symbol}")
+                data_placeholder = st.empty()
+                with data_placeholder.container():
+                    df, info = get_stock_data(symbol, st.session_state.selected_interval)
+                    if df is not None and info:
+                        st.markdown(f"<div class='stock-timestamp'>Last Updated: {info['timestamp']}</div>", unsafe_allow_html=True)
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Current Price", f"${info['price']:.2f}")
+                        with col2:
+                            st.metric("Low Price", f"${info['low']:.2f}")
+                        with col3:
+                            st.metric("High Price", f"${info['high']:.2f}")
+                        with col4:
+                            st.metric("Volume", f"{info['volume']:,}")
+                        fig = create_candlestick_chart(df, symbol)
+                        if fig:
+                            st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.error(f"No data available for {symbol}.")
+            st.success(f"✅ Data updated at {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            st.session_state.refresh_trigger = False
 else:
     st.info("Add a stock symbol to the watchlist to start tracking.")
