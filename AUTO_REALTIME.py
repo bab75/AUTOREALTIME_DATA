@@ -149,7 +149,7 @@ if st.session_state.watchlist:
         st.progress(progress_value)
 
     # Trigger automatic refresh based on interval
-    if elapsed >= refresh_interval:
+    if elapsed >= refresh_interval and not st.session_state.refresh_trigger:
         st.session_state.refresh_trigger = True
         st.session_state.last_refresh_time = current_time
         st.rerun()
