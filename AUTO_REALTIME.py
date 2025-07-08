@@ -197,7 +197,7 @@ else:
             st.metric("📊 High", f"${stock_info['high']:.2f}")
             st.metric("📉 Low", f"${stock_info['low']:.2f}")
             st.markdown(f"""
-                <div style="font-size: 16px; font-weight: bold;">
+                <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['volume_change_pct'] >= 0 else 'red'};">
                     📦 Volume: {int(stock_info['volume']):,}
                 </div>
             """, unsafe_allow_html=True)
