@@ -117,39 +117,44 @@ if st.sidebar.button("Add to Watchlist"):
             st.session_state.input_key += 1
             st.session_state.last_update = time.time()
             st.session_state.last_timer_check = time.time()
-            st.session_state.refresh_trigger = True  # Trigger initial refresh
+            st.session_state.refresh_trigger = True
             st.rerun()
         else:
             st.sidebar.warning(f"{symbol_input} is already in the watchlist!")
     else:
         st.sidebar.error("Please enter a valid stock symbol.")
 
-# Timer logic in sidebar
+# Dynamic timer in sidebar
 if st.session_state.watchlist:
+    placeholder = st.sidebar.empty()
+    progress_placeholder = st.sidebar.empty()
+
     current_time = time.time()
     elapsed = current_time - st.session_state.last_timer_check
     refresh_interval = interval_options[st.session_state.selected_interval]
     progress_value = min(elapsed / refresh_interval, 1.0)
     time_remaining = max(0, refresh_interval - elapsed)
 
-    with st.sidebar:
+    with placeholder.container():
         st.markdown(f"""
         <div class="progress-container">
             <div class="progress-interval">Refresh Interval: {st.session_state.selected_interval}</div>
             <div class="progress-text">Time until next refresh: {int(time_remaining)}s</div>
         </div>
         """, unsafe_allow_html=True)
+    with progress_placeholder.container():
         st.progress(progress_value)
 
-        if progress_value >= 1.0:
-            st.session_state.refresh_trigger = True
-            st.session_state.last_timer_check = current_time
-            st.rerun()
+    # Check for refresh trigger
+    if progress_value >= 1.0:
+        st.session_state.refresh_trigger = True
+        st.session_state.last_timer_check = current_time
+        st.rerun()
 
-        if st.button("🔄 Refresh Now"):
-            st.session_state.refresh_trigger = True
-            st.session_state.last_timer_check = current_time
-            st.rerun()
+    if st.sidebar.button("🔄 Refresh Now"):
+        st.session_state.refresh_trigger = True
+        st.session_state.last_timer_check = current_time
+        st.rerun()
 
 # Main app
 st.title("Stock Market Watchlist")
