@@ -8,115 +8,33 @@ import pytz
 
 # Initialize session state
 if 'watchlist' not in st.session_state:
-    st.session_state.watchlist = []
+    st.session_state.watchlist = {}
 if 'last_update' not in st.session_state:
-    st.session_state.last_update = time.time()
-if 'selected_interval' not in st.session_state:
-    st.session_state.selected_interval = '5m'
-if 'input_key' not in st.session_state:
-    st.session_state.input_key = 0
-if 'refresh_trigger' not in st.session_state:
-    st.session_state.refresh_trigger = False
-if 'data_cache' not in st.session_state:
-    st.session_state.data_cache = {}
+    st.session_state.last_update = {}
+if 'auto_refresh' not in st.session_state:
+    st.session_state.auto_refresh = False
+if 'refresh_interval' not in st.session_state:
+    st.session_state.refresh_interval = 60
 
-# Define interval options (in seconds)
-interval_options = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600}
-
-# Custom CSS and JavaScript for styling and dynamic refresh
-st.markdown("""
-<style>
-.progress-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin: 15px 0;
-    background: rgba(255, 255, 255, 0.8);
-    padding: 15px;
-    border-radius: 10px;
-}
-.progress-text {
-    font-size: 20px;
-    font-weight: bold;
-    color: #000000;
-    margin-top: 10px;
-}
-.progress-interval {
-    font-size: 16px;
-    color: #000000;
-    font-weight: bold;
-    margin-top: 10px;
-}
-body {
-    background: linear-gradient(135deg, #e6f3ff, #ffffff);
-}
-.system-time, .stock-timestamp {
-    font-size: 16px;
-    color: #000000;
-    font-weight: bold;
-    margin-bottom: 10px;
-}
-.stock-data {
-    margin-top: 10px;
-}
-.stock-metrics {
-    display: flex;
-    justify-content: space-between;
-    width: 100%;
-    margin-top: 5px;
-}
-.stock-metric {
-    font-size: 14px;
-    padding: 5px;
-    font-weight: bold;
-}
-</style>
-<script>
-function refreshData() {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4 && this.status == 200) {
-            document.getElementById('stock-data').innerHTML = this.responseText;
-        }
-    };
-    xhttp.open("GET", window.location.pathname + "?refresh=true", true);
-    xhttp.send();
-}
-setInterval(refreshData, 300000); // Refresh every 300 seconds (5 minutes)
-</script>
-""", unsafe_allow_html=True)
-
-# Function to get stock data
+# Custom functions (replace with your utils if different)
 def get_stock_data(symbol, interval, period='1d'):
     try:
-        # Force refresh if triggered to avoid caching old data
-        if st.session_state.refresh_trigger:
-            stock = yf.Ticker(symbol)
-            df = stock.history(period=period, interval=interval)
-            if df.empty:
-                st.error(f"No data available for {symbol} with interval {interval}")
-                return None, None
-            current_price = df['Close'].iloc[-1] if not df.empty else None
-            volume = df['Volume'].iloc[-1] if 'Volume' in df.columns and not pd.isna(df['Volume'].iloc[-1]) else 0
-            low_price = df['Low'].min() if not df.empty else None
-            high_price = df['High'].max() if not df.empty else None
-            timestamp = df.index[-1]
-            local_tz = datetime.now().astimezone().tzinfo
-            timestamp_local = timestamp.tz_convert(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
-            st.session_state.data_cache[symbol] = {
-                'price': current_price,
-                'volume': volume,
-                'low': low_price,
-                'high': high_price,
-                'timestamp': timestamp_local
-            }
-        return df, st.session_state.data_cache[symbol]
+        stock = yf.Ticker(symbol)
+        df = stock.history(period=period, interval=interval)
+        if df.empty:
+            st.error(f"No data available for {symbol} with interval {interval}")
+            return None
+        current_price = df['Close'].iloc[-1]
+        volume = df['Volume'].iloc[-1]
+        timestamp = df.index[-1]
+        local_tz = datetime.now().astimezone().tzinfo
+        timestamp_local = timestamp.tz_convert(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
+        return {'data': df, 'price': current_price, 'volume': volume, 'timestamp': timestamp_local}
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
-        return None, None
+        return None
 
-# Function to create candlestick chart
-def create_candlestick_chart(df, symbol):
+def create_candlestick_chart(df, symbol, interval):
     if df is not None and not df.empty:
         fig = go.Figure(data=[go.Candlestick(
             x=df.index,
@@ -127,7 +45,7 @@ def create_candlestick_chart(df, symbol):
             name=symbol
         )])
         fig.update_layout(
-            title=f"{symbol} Candlestick Chart",
+            title=f"{symbol} Candlestick Chart ({interval})",
             xaxis_title="Time",
             yaxis_title="Price",
             xaxis_rangeslider_visible=False
@@ -135,88 +53,135 @@ def create_candlestick_chart(df, symbol):
         return fig
     return None
 
-# Sidebar for input
-st.sidebar.header("Stock Watchlist")
-symbol_input = st.sidebar.text_input("Enter Stock Symbol (e.g., ASML)", "", key=f"symbol_input_{st.session_state.input_key}").upper()
-interval = st.sidebar.selectbox("Select Interval", options=list(interval_options.keys()), index=1, key=f"interval_select_{st.session_state.input_key}")
-if st.sidebar.button("Add to Watchlist"):
-    if symbol_input:
-        if symbol_input not in st.session_state.watchlist:
-            st.session_state.watchlist.append(symbol_input)
-            st.session_state.selected_interval = interval
-            st.session_state.input_key += 1
-            st.session_state.last_update = time.time()
-            st.session_state.refresh_trigger = True
-            st.rerun()
+# Configure page
+st.set_page_config(
+    page_title="Real-Time Stock Dashboard",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Real-time clock
+def display_clock():
+    while True:
+        current_time = datetime.now().astimezone(pytz.timezone('US/Eastern')).strftime('%Y-%m-%d %H:%M:%S %Z')
+        st.markdown(f"<div style='position: absolute; top: 10px; right: 10px; font-size: 16px; font-weight: bold;'>Clock: {current_time}</div>", unsafe_allow_html=True)
+        time.sleep(1)  # Update every second
+threading.Thread(target=display_clock, daemon=True).start()
+
+# Title and description
+st.title("📈 Real-Time Stock Monitoring Dashboard")
+st.markdown("Track multiple stocks with interactive candlestick charts and real-time updates")
+
+# Sidebar for controls
+with st.sidebar:
+    st.header("⚙️ Controls")
+    
+    # Stock symbol input
+    symbol_input = st.text_input(
+        "Enter Stock Symbol (e.g., ASML)",
+        placeholder="e.g., ASML",
+        help="Enter a valid stock symbol"
+    )
+    
+    # Time interval selection
+    interval_options = {
+        "1m": "1 Minute", "2m": "2 Minutes", "5m": "5 Minutes",
+        "15m": "15 Minutes", "30m": "30 Minutes", "60m": "60 Minutes",
+        "90m": "90 Minutes", "1h": "1 Hour", "1d": "1 Day",
+        "5d": "5 Days", "1wk": "1 Week", "1mo": "1 Month"
+    }
+    selected_interval = st.selectbox(
+        "Select Chart Time Interval",
+        options=list(interval_options.keys()),
+        format_func=lambda x: interval_options[x],
+        index=2,  # Default to 5m
+        help="Each candle represents this time period"
+    )
+    
+    # Submit button
+    if st.button("📊 Add to Watchlist", type="primary"):
+        if symbol_input:
+            symbol = symbol_input.upper().strip()
+            if symbol:  # Basic validation
+                data = get_stock_data(symbol, selected_interval)
+                if data is not None:
+                    st.session_state.watchlist[symbol] = {
+                        'data': data['data'],
+                        'interval': selected_interval,
+                        'last_update': data['timestamp'],
+                        'price': data['price'],
+                        'volume': data['volume']
+                    }
+                    st.success(f"✅ Added {symbol} to watchlist!")
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to fetch data for this symbol")
+            else:
+                st.error("❌ Invalid stock symbol")
         else:
-            st.sidebar.warning(f"{symbol_input} is already in the watchlist!")
-    else:
-        st.sidebar.error("Please enter a valid stock symbol.")
+            st.error("❌ Please enter a stock symbol")
 
-# Dynamic timer display
-if st.session_state.watchlist:
-    countdown_placeholder = st.sidebar.empty()
-    progress_placeholder = st.sidebar.empty()
+    # Auto-refresh button
+    if st.button("🔄 Refresh All", key="refresh_all"):
+        st.session_state.auto_refresh = True
+        with st.spinner("🔄 Refreshing stock data..."):
+            for symbol in list(st.session_state.watchlist.keys()):
+                data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'])
+                if data is not None:
+                    st.session_state.watchlist[symbol]['data'] = data['data']
+                    st.session_state.watchlist[symbol]['last_update'] = data['timestamp']
+                    st.session_state.watchlist[symbol]['price'] = data['price']
+                    st.session_state.watchlist[symbol]['volume'] = data['volume']
+            st.success("✅ All stocks refreshed!")
+        st.rerun()
 
-    current_time = time.time()
-    elapsed = current_time - st.session_state.last_update
-    refresh_interval = interval_options[st.session_state.selected_interval]
-    progress_value = min(elapsed / refresh_interval, 1.0)
-    time_remaining = max(0, refresh_interval - elapsed)
+    # Clear all button
+    if st.button("🗑️ Clear All Stocks", type="secondary"):
+        st.session_state.watchlist = {}
+        st.success("✅ All stocks cleared!")
+        st.rerun()
 
-    with countdown_placeholder.container():
-        st.markdown(f"""
-        <div class="progress-container">
-            <div class="progress-interval">Refresh Interval: {st.session_state.selected_interval}</div>
-            <div class="progress-text">Time until next refresh: {int(time_remaining)}s</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with progress_placeholder.container():
-        st.progress(progress_value)
-
-# Main app
-st.title("Stock Market Watchlist")
-
-# Display current system time
-current_system_time = datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')
-st.markdown(f"<div class='system-time'>System Time: {current_system_time}</div>", unsafe_allow_html=True)
-
-# Display watchlist with dynamic refresh
-if st.session_state.watchlist:
-    st.subheader("Watchlist")
-    for symbol in st.session_state.watchlist:
-        st.write(f"- {symbol}")
-
-    # Handle refresh request from JavaScript
-    if st.query_params.get('refresh'):
-        st.session_state.refresh_trigger = True
-        st.experimental_rerun()
-
-    # Update data
-    if st.session_state.refresh_trigger:
-        with st.spinner("Fetching stock data..."):
-            data_html = ""
-            for i, symbol in enumerate(st.session_state.watchlist):
-                st.subheader(f"Stock: {symbol}")
-                data_placeholder = st.empty()
-                df, info = get_stock_data(symbol, st.session_state.selected_interval)
-                if df is not None and info:
-                    data_html += f"""
-                    <div class="stock-data">
-                        <div class='stock-timestamp'>Last Updated: {info['timestamp']}</div>
-                        <div class='stock-metrics'>
-                            <div class='stock-metric'><strong>Current Price:</strong> ${info['price']:.2f}</div>
-                            <div class='stock-metric'><strong>Volume:</strong> {info['volume']:,}</div>
+# Main content area
+if not st.session_state.watchlist:
+    st.info("📝 Add stocks to your watchlist using the sidebar to get started!")
+else:
+    for symbol, stock_info in st.session_state.watchlist.items():
+        with st.container():
+            st.subheader(f"📊 {symbol}")
+            
+            # Stock information and chart
+            col1, col2 = st.columns([1, 3])
+            
+            with col1:
+                # Display timestamp
+                st.markdown(f"**Last Updated:** {stock_info['last_update']}")
+                
+                # Custom HTML for price and volume layout
+                st.markdown(f"""
+                    <div style="position: relative; min-height: 60px;">
+                        <div style="position: absolute; top: 0; right: 0; text-align: right;">
+                            <div style="font-size: 18px; font-weight: bold;">Current Price: ${stock_info['price']:.2f}</div>
+                            <div style="font-size: 16px; font-weight: bold;">Volume: {stock_info['volume']:,}</div>
                         </div>
                     </div>
-                    """
-                    if df is not None and create_candlestick_chart(df, symbol):
-                        st.plotly_chart(create_candlestick_chart(df, symbol), use_container_width=True)
+                """, unsafe_allow_html=True)
+                
+                # Remove and refresh buttons
+                if st.button(f"❌ Remove {symbol}", key=f"remove_{symbol}"):
+                    del st.session_state.watchlist[symbol]
+                    st.success(f"✅ {symbol} removed from watchlist!")
+                    st.rerun()
+            
+            with col2:
+                fig = create_candlestick_chart(stock_info['data'], symbol, stock_info['interval'])
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True)
                 else:
-                    data_html += f"<div class='stock-data'>Failed to fetch data for {symbol}.</div>"
-            st.markdown(f"<div id='stock-data'>{data_html}</div>", unsafe_allow_html=True)
-            st.success(f"✅ Data updated at {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
-            st.session_state.refresh_trigger = False
-            st.session_state.last_update = time.time()
-else:
-    st.info("Add a stock symbol to the watchlist to start tracking.")
+                    st.warning("No data available for chart")
+            
+            st.divider()
+
+# Footer
+st.markdown("---")
+st.markdown("🔍 **Data provided by Yahoo Finance** | 📊 **Real-Time Stock Monitoring Dashboard**")
