@@ -2,8 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 
 # Initialize session state
@@ -17,15 +16,11 @@ if 'input_key' not in st.session_state:
     st.session_state.input_key = 0
 if 'refresh_trigger' not in st.session_state:
     st.session_state.refresh_trigger = False
-if 'last_timer_check' not in st.session_state:
-    st.session_state.last_timer_check = time.time()
-if 'last_refresh_time' not in st.session_state:
-    st.session_state.last_refresh_time = time.time()
 
-# Define interval options
+# Define interval options (in seconds)
 interval_options = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600}
 
-# Custom CSS for styling
+# Custom CSS and HTML for styling and refresh
 st.markdown("""
 <style>
 .progress-container {
@@ -59,6 +54,7 @@ body {
     margin-bottom: 10px;
 }
 </style>
+<meta http-equiv="refresh" content="300"> <!-- Refresh every 300 seconds (5 minutes) -->
 """, unsafe_allow_html=True)
 
 # Function to get stock data
@@ -107,7 +103,7 @@ def create_candlestick_chart(df, symbol):
         return fig
     return None
 
-# Sidebar for input and timer
+# Sidebar for input
 st.sidebar.header("Stock Watchlist")
 symbol_input = st.sidebar.text_input("Enter Stock Symbol (e.g., AAPL)", "", key=f"symbol_input_{st.session_state.input_key}").upper()
 interval = st.sidebar.selectbox("Select Interval", options=list(interval_options.keys()), index=1, key=f"interval_select_{st.session_state.input_key}")
@@ -118,8 +114,6 @@ if st.sidebar.button("Add to Watchlist"):
             st.session_state.selected_interval = interval
             st.session_state.input_key += 1
             st.session_state.last_update = time.time()
-            st.session_state.last_timer_check = time.time()
-            st.session_state.last_refresh_time = time.time()
             st.session_state.refresh_trigger = True
             st.rerun()
         else:
@@ -127,13 +121,13 @@ if st.sidebar.button("Add to Watchlist"):
     else:
         st.sidebar.error("Please enter a valid stock symbol.")
 
-# Dynamic timer in sidebar
+# Dynamic timer display (for visual feedback, not controlling refresh)
 if st.session_state.watchlist:
     countdown_placeholder = st.sidebar.empty()
     progress_placeholder = st.sidebar.empty()
 
     current_time = time.time()
-    elapsed = current_time - st.session_state.last_refresh_time
+    elapsed = current_time - st.session_state.last_update
     refresh_interval = interval_options[st.session_state.selected_interval]
     progress_value = min(elapsed / refresh_interval, 1.0)
     time_remaining = max(0, refresh_interval - elapsed)
@@ -148,17 +142,6 @@ if st.session_state.watchlist:
     with progress_placeholder.container():
         st.progress(progress_value)
 
-    # Trigger automatic refresh based on interval
-    if elapsed >= refresh_interval and not st.session_state.refresh_trigger:
-        st.session_state.refresh_trigger = True
-        st.session_state.last_refresh_time = current_time
-        st.rerun()
-
-    if st.sidebar.button("🔄 Refresh Now"):
-        st.session_state.refresh_trigger = True
-        st.session_state.last_refresh_time = current_time
-        st.rerun()
-
 # Main app
 st.title("Stock Market Watchlist")
 
@@ -172,7 +155,7 @@ if st.session_state.watchlist:
     for symbol in st.session_state.watchlist:
         st.write(f"- {symbol}")
 
-    # Refresh data if triggered
+    # Refresh data if triggered (initial load or manual refresh)
     if st.session_state.refresh_trigger:
         with st.spinner("Fetching stock data..."):
             for i, symbol in enumerate(st.session_state.watchlist):
