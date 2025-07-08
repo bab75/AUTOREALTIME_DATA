@@ -118,7 +118,7 @@ if st.sidebar.button("Add to Watchlist"):
             st.session_state.last_update = time.time()
             st.session_state.last_timer_check = time.time()
             st.session_state.refresh_trigger = True
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.sidebar.warning(f"{symbol_input} is already in the watchlist!")
     else:
@@ -149,12 +149,12 @@ if st.session_state.watchlist:
     if progress_value >= 1.0:
         st.session_state.refresh_trigger = True
         st.session_state.last_timer_check = current_time
-        st.experimental_rerun()
+        st.rerun()
 
     if st.sidebar.button("🔄 Refresh Now"):
         st.session_state.refresh_trigger = True
         st.session_state.last_timer_check = current_time
-        st.experimental_rerun()
+        st.rerun()
 
 # Main app
 st.title("Stock Market Watchlist")
