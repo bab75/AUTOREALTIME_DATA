@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import time
 from datetime import datetime
 import pytz
+import threading  # Added missing import
 
 # Initialize session state
 if 'watchlist' not in st.session_state:
