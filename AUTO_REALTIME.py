@@ -28,19 +28,22 @@ def get_stock_data(symbol, interval, period='1d'):
             return None
         current_price = df['Close'].iloc[-1]
         previous_price = df['Close'].iloc[-2]
-        volume = df['Volume'].iloc[-1]
+        current_volume = df['Volume'].iloc[-1]
+        previous_volume = df['Volume'].iloc[-2]
         timestamp = df.index[-1]
         local_tz = datetime.now().astimezone().tzinfo
         timestamp_local = timestamp.tz_convert(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
         change_pct = ((current_price - previous_price) / previous_price) * 100
+        volume_change_pct = ((current_volume - previous_volume) / previous_volume) * 100 if previous_volume > 0 else 0
         return {
             'data': df,
             'price': current_price,
-            'volume': volume,
+            'volume': current_volume,
             'open': df['Open'].iloc[-1],
             'high': df['High'].iloc[-1],
             'low': df['Low'].iloc[-1],
             'change_pct': change_pct,
+            'volume_change_pct': volume_change_pct,
             'timestamp': timestamp_local
         }
     except Exception as e:
@@ -131,7 +134,8 @@ with st.sidebar:
                         'open': data['open'],
                         'high': data['high'],
                         'low': data['low'],
-                        'change_pct': data['change_pct']
+                        'change_pct': data['change_pct'],
+                        'volume_change_pct': data['volume_change_pct']
                     }
                     st.success(f"✅ Added {symbol} to watchlist!")
                     st.rerun()
@@ -156,6 +160,7 @@ with st.sidebar:
                     st.session_state.watchlist[symbol]['high'] = data['high']
                     st.session_state.watchlist[symbol]['low'] = data['low']
                     st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
+                    st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
             st.success("✅ All stocks refreshed!")
         st.rerun()
 
@@ -179,17 +184,21 @@ else:
             st.markdown(f"""
                 <div style="position: relative; min-height: 60px;">
                     <div style="position: absolute; top: 0; right: 0; text-align: right;">
-                        <div style="font-size: 18px; font-weight: bold;">Current Price: ${stock_info['price']:.2f}</div>
-                        <div style="font-size: 16px; font-weight: bold;">Change: {stock_info['change_pct']:+.2f}%</div>
+                        <div style="font-size: 18px; font-weight: bold; color: {'green' if stock_info['change_pct'] >= 0 else 'red'};">Current Price: ${stock_info['price']:.2f}</div>
+                        <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['change_pct'] >= 0 else 'red'};">Change: {stock_info['change_pct']:+.2f}%</div>
                     </div>
                 </div>
             """, unsafe_allow_html=True)
             
-            # Metrics in vertical layout
+            # Metrics in vertical layout with colored volume
             st.metric("📈 Open", f"${stock_info['open']:.2f}")
             st.metric("📊 High", f"${stock_info['high']:.2f}")
             st.metric("📉 Low", f"${stock_info['low']:.2f}")
-            st.metric("📦 Volume", f"{int(stock_info['volume']):,}")
+            st.markdown(f"""
+                <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['volume_change_pct'] >= 0 else 'red'};">
+                    📦 Volume: {int(stock_info['volume']):,}
+                </div>
+            """, unsafe_allow_html=True)
             
             # Chart below stock data
             fig = create_candlestick_chart(stock_info['data'], symbol, stock_info['interval'])
@@ -200,6 +209,3 @@ else:
             
             st.divider()
 
-# Footer
-st.markdown("---")
-st.markdown("🔍 **Data provided by Yahoo Finance** | 📊 **Real-Time Stock Monitoring Dashboard**")
