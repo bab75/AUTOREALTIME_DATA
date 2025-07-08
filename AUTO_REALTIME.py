@@ -12,7 +12,7 @@ if 'watchlist' not in st.session_state:
 if 'last_update' not in st.session_state:
     st.session_state.last_update = time.time()
 if 'selected_interval' not in st.session_state:
-    st.session_state.selected_interval = '1m'
+    st.session_state.selected_interval = '5m'  # Changed to 5m for testing
 if 'input_key' not in st.session_state:
     st.session_state.input_key = 0
 if 'refresh_trigger' not in st.session_state:
@@ -62,13 +62,13 @@ body {
 # Function to get stock data
 def get_stock_data(symbol, interval, period='1d'):
     try:
-        stock = yfinance.Ticker(symbol)
+        stock = yf.Ticker(symbol)
         df = stock.history(period=period, interval=interval)
         if df.empty:
-            st.error(f"No data available for {symbol}")
+            st.error(f"No data available for {symbol} with interval {interval}")
             return None, None
         current_price = df['Close'].iloc[-1] if not df.empty else None
-        volume = df['Volume'].iloc[-1] if not df.empty else 0  # Default to 0 if None
+        volume = df['Volume'].iloc[-1] if 'Volume' in df.columns and not pd.isna(df['Volume'].iloc[-1]) else 0
         low_price = df['Low'].min() if not df.empty else None
         high_price = df['High'].max() if not df.empty else None
         timestamp = df.index[-1]
@@ -108,7 +108,7 @@ def create_candlestick_chart(df, symbol):
 # Sidebar for input and timer
 st.sidebar.header("Stock Watchlist")
 symbol_input = st.sidebar.text_input("Enter Stock Symbol (e.g., AAPL)", "", key=f"symbol_input_{st.session_state.input_key}").upper()
-interval = st.sidebar.selectbox("Select Interval", options=list(interval_options.keys()), index=0, key=f"interval_select_{st.session_state.input_key}")
+interval = st.sidebar.selectbox("Select Interval", options=list(interval_options.keys()), index=1, key=f"interval_select_{st.session_state.input_key}")  # Default to 5m
 if st.sidebar.button("Add to Watchlist"):
     if symbol_input:
         if symbol_input not in st.session_state.watchlist:
@@ -135,36 +135,25 @@ if st.session_state.watchlist:
     progress_value = min(elapsed / refresh_interval, 1.0)
     time_remaining = max(0, refresh_interval - elapsed)
 
-    # Update timer and progress in a loop
-    while time_remaining > 0 and not st.session_state.refresh_trigger:
-        current_time = time.time()
-        elapsed = current_time - st.session_state.last_timer_check
-        progress_value = min(elapsed / refresh_interval, 1.0)
-        time_remaining = max(0, refresh_interval - elapsed)
-
-        with countdown_placeholder.container():
-            st.markdown(f"""
-            <div class="progress-container">
-                <div class="progress-interval">Refresh Interval: {st.session_state.selected_interval}</div>
-                <div class="progress-text">Time until next refresh: {int(time_remaining)}s</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with progress_placeholder.container():
-            st.progress(progress_value)
-
-        time.sleep(1)  # Update every second
-        if st.session_state.get('manual_refresh', False):
-            break
+    with countdown_placeholder.container():
+        st.markdown(f"""
+        <div class="progress-container">
+            <div class="progress-interval">Refresh Interval: {st.session_state.selected_interval}</div>
+            <div class="progress-text">Time until next refresh: {int(time_remaining)}s</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with progress_placeholder.container():
+        st.progress(progress_value)
 
     # Trigger refresh if interval completed or manual refresh requested
-    if progress_value >= 1.0 or st.session_state.get('manual_refresh', False):
+    if progress_value >= 1.0:
         st.session_state.refresh_trigger = True
         st.session_state.last_timer_check = current_time
-        st.session_state.pop('manual_refresh', None)
         st.rerun()
 
     if st.sidebar.button("🔄 Refresh Now"):
-        st.session_state['manual_refresh'] = True
+        st.session_state.refresh_trigger = True
+        st.session_state.last_timer_check = current_time
         st.rerun()
 
 # Main app
@@ -198,7 +187,7 @@ if st.session_state.watchlist:
                         with col3:
                             st.metric("High Price", f"${info['high']:.2f}")
                         with col4:
-                            st.metric("Volume", f"{info['volume']:,}" if info['volume'] is not None else "N/A")
+                            st.metric("Volume", f"{info['volume']:,}" if info['volume'] > 0 else "N/A")
                         fig = create_candlestick_chart(df, symbol)
                         if fig:
                             st.plotly_chart(fig, use_container_width=True)
