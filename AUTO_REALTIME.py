@@ -16,7 +16,9 @@ if 'last_update' not in st.session_state:
 if 'auto_refresh' not in st.session_state:
     st.session_state.auto_refresh = False
 if 'refresh_interval' not in st.session_state:
-    st.session_state.refresh_interval = 60
+    st.session_state.refresh_interval = 60  # Default to 60 seconds
+if 'last_refresh_time' not in st.session_state:
+    st.session_state.last_refresh_time = time.time()
 
 # Custom functions
 def get_stock_data(symbol, interval, period='1d'):
@@ -62,7 +64,6 @@ def create_candlestick_chart(df, symbol, interval):
                                     name=symbol),
                      row=1, col=1)
         
-        # Color volume bars based on change from previous period
         colors = ['green' if df['Volume'].iloc[i] >= df['Volume'].iloc[max(0, i-1)] else 'red' for i in range(len(df))]
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume', marker_color=colors), row=2, col=1)
         
@@ -89,8 +90,11 @@ st.set_page_config(
 def display_clock():
     while True:
         current_time = datetime.now().astimezone(pytz.timezone('US/Eastern')).strftime('%Y-%m-%d %H:%M:%S %Z')
-        st.markdown(f"<div style='position: absolute; top: 10px; right: 10px; font-size: 16px; font-weight: bold;'>Clock: {current_time}</div>", unsafe_allow_html=True)
+        clock_placeholder.markdown(f"<div style='position: absolute; top: 10px; right: 10px; font-size: 16px; font-weight: bold;'>Clock: {current_time}</div>", unsafe_allow_html=True)
         time.sleep(1)
+
+# Start clock in a separate thread
+clock_placeholder = st.empty()
 threading.Thread(target=display_clock, daemon=True).start()
 
 # Title and description
@@ -121,6 +125,23 @@ with st.sidebar:
         help="Each candle represents this time period"
     )
     
+    refresh_interval = st.number_input(
+        "Auto-Refresh Interval (seconds)",
+        min_value=10,
+        max_value=3600,
+        value=st.session_state.refresh_interval,
+        step=10,
+        help="Set the interval for auto-refresh in seconds"
+    )
+    st.session_state.refresh_interval = refresh_interval
+    
+    auto_refresh = st.toggle(
+        "Enable Auto-Refresh",
+        value=st.session_state.auto_refresh,
+        help="Toggle to enable/disable automatic data refresh"
+    )
+    st.session_state.auto_refresh = auto_refresh
+    
     if st.button("📊 Add to Watchlist", type="primary"):
         if symbol_input:
             symbol = symbol_input.upper().strip()
@@ -149,7 +170,6 @@ with st.sidebar:
             st.error("❌ Please enter a stock symbol")
 
     if st.button("🔄 Refresh All", key="refresh_all"):
-        st.session_state.auto_refresh = True
         with st.spinner("🔄 Refreshing stock data..."):
             for symbol in list(st.session_state.watchlist.keys()):
                 data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'])
@@ -164,11 +184,32 @@ with st.sidebar:
                     st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
                     st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
             st.success("✅ All stocks refreshed!")
+            st.session_state.last_refresh_time = time.time()
         st.rerun()
 
     if st.button("🗑️ Clear All Stocks", type="secondary"):
         st.session_state.watchlist = {}
         st.success("✅ All stocks cleared!")
+        st.rerun()
+
+# Auto-refresh logic
+if st.session_state.auto_refresh:
+    current_time = time.time()
+    if current_time - st.session_state.last_refresh_time >= st.session_state.refresh_interval:
+        with st.spinner("🔄 Auto-refreshing stock data..."):
+            for symbol in list(st.session_state.watchlist.keys()):
+                data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'])
+                if data is not None:
+                    st.session_state.watchlist[symbol]['data'] = data['data']
+                    st.session_state.watchlist[symbol]['last_update'] = data['timestamp']
+                    st.session_state.watchlist[symbol]['price'] = data['price']
+                    st.session_state.watchlist[symbol]['volume'] = data['volume']
+                    st.session_state.watchlist[symbol]['open'] = data['open']
+                    st.session_state.watchlist[symbol]['high'] = data['high']
+                    st.session_state.watchlist[symbol]['low'] = data['low']
+                    st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
+                    st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
+            st.session_state.last_refresh_time = current_time
         st.rerun()
 
 # Main content area
@@ -179,10 +220,8 @@ else:
         with st.container():
             st.subheader(f"📊 {symbol}")
             
-            # Stock information
             st.markdown(f"**Last Updated:** {stock_info['last_update']}")
             
-            # Price and change at top right
             st.markdown(f"""
                 <div style="position: relative; min-height: 60px;">
                     <div style="position: absolute; top: 0; right: 0; text-align: right;">
@@ -192,7 +231,6 @@ else:
                 </div>
             """, unsafe_allow_html=True)
             
-            # Metrics in vertical layout
             st.metric("📈 Open", f"${stock_info['open']:.2f}")
             st.metric("📊 High", f"${stock_info['high']:.2f}")
             st.metric("📉 Low", f"${stock_info['low']:.2f}")
@@ -202,7 +240,6 @@ else:
                 </div>
             """, unsafe_allow_html=True)
             
-            # Chart below stock data
             fig = create_candlestick_chart(stock_info['data'], symbol, stock_info['interval'])
             if fig:
                 st.plotly_chart(fig, use_container_width=True)
