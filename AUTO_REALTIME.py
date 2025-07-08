@@ -112,9 +112,9 @@ with st.sidebar:
     )
     
     interval_options = {
-        "1m": "1 Minute", "2m": "2 Minutes", "5m": "5 Minutes",
-        "15m": "15 Minutes", "30m": "30 Minutes", "1H": "60 Minutes",
-        "2H": "120 Minutes", "4H": "240 Minutes"
+        "1m": "1 Minute", "2m": "2M", "5m": "5M",
+        "15m": "15M", "30m": "30Ms", "1h": "1H",
+        "2h": "2H", "4h": "4H"
     }
     selected_interval = st.selectbox(
         "Select Chart Time Interval",
