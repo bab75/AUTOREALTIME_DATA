@@ -9,4 +9,4 @@ streamlit_autorefresh>=0.0.1
 polygon-api-client>=1.12.4
 requests>=2.31.0
 rich>=10.14.0
-metatrader5<=5.0.50
+metatrader5
