@@ -17,7 +17,7 @@ if 'last_update' not in st.session_state:
 if 'auto_refresh' not in st.session_state:
     st.session_state.auto_refresh = False
 if 'refresh_interval' not in st.session_state:
-    st.session_state.refresh_interval = 10  # Default to 10 seconds
+    st.session_state.refresh_interval = 60  # Default to 60 seconds
 if 'last_refresh_time' not in st.session_state:
     st.session_state.last_refresh_time = time.time()
 if 'refresh_count' not in st.session_state:
@@ -133,6 +133,32 @@ threading.Thread(target=display_clock, daemon=True).start()
 st.title("📈 Real-Time Stock Monitoring Dashboard")
 st.markdown("Track multiple stocks with interactive candlestick charts and real-time updates")
 
+# Auto-refresh logic (must be before sidebar to ensure timestamp updates)
+if st.session_state.auto_refresh:
+    # Convert interval to milliseconds (60 seconds = 60000 ms)
+    refresh_count = st_autorefresh(interval=st.session_state.refresh_interval * 1000, key="stockrefresh")
+    if refresh_count > 0:  # Skip first run to avoid immediate refresh
+        with st.spinner("🔄 Auto-refreshing stock data..."):
+            any_data_updated = False
+            for symbol in list(st.session_state.watchlist.keys()):
+                data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'])
+                if data is not None:
+                    st.session_state.watchlist[symbol]['data'] = data['data']
+                    st.session_state.watchlist[symbol]['last_update'] = data['timestamp']
+                    st.session_state.watchlist[symbol]['price'] = data['price']
+                    st.session_state.watchlist[symbol]['volume'] = data['volume']
+                    st.session_state.watchlist[symbol]['open'] = data['open']
+                    st.session_state.watchlist[symbol]['high'] = data['high']
+                    st.session_state.watchlist[symbol]['low'] = data['low']
+                    st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
+                    st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
+                    any_data_updated = True
+            st.session_state.last_refresh_time = time.time()  # Update timestamp even if no data fetched
+            if any_data_updated:
+                st.session_state.refresh_count += 1
+            else:
+                st.warning("Auto-refresh failed: No data updated for any stock")
+
 # Sidebar for controls
 with st.sidebar:
     st.header("⚙️ Controls")
@@ -238,32 +264,6 @@ with st.sidebar:
         options=list(st.session_state.watchlist.keys()) if st.session_state.watchlist else ["No stocks available"],
         help="Select a stock to view its volume trend"
     )
-
-# Auto-refresh logic
-if st.session_state.auto_refresh:
-    # Convert interval to milliseconds (10 seconds = 10000 ms)
-    refresh_count = st_autorefresh(interval=st.session_state.refresh_interval * 1000, key="stockrefresh")
-    if refresh_count > 0:  # Skip first run to avoid immediate refresh
-        with st.spinner("🔄 Auto-refreshing stock data..."):
-            any_data_updated = False
-            for symbol in list(st.session_state.watchlist.keys()):
-                data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'])
-                if data is not None:
-                    st.session_state.watchlist[symbol]['data'] = data['data']
-                    st.session_state.watchlist[symbol]['last_update'] = data['timestamp']
-                    st.session_state.watchlist[symbol]['price'] = data['price']
-                    st.session_state.watchlist[symbol]['volume'] = data['volume']
-                    st.session_state.watchlist[symbol]['open'] = data['open']
-                    st.session_state.watchlist[symbol]['high'] = data['high']
-                    st.session_state.watchlist[symbol]['low'] = data['low']
-                    st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
-                    st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
-                    any_data_updated = True
-            if any_data_updated:
-                st.session_state.last_refresh_time = time.time()
-                st.session_state.refresh_count += 1
-            else:
-                st.warning("Auto-refresh failed: No data updated for any stock")
 
 # Main content area
 if not st.session_state.watchlist:
