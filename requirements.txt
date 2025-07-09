@@ -6,4 +6,4 @@ datetime
 pytz
 numpy>=1.26.0
 streamlit_autorefresh>=0.0.1
-pandas-ta>=0.3.14b0
+pandas-ta
