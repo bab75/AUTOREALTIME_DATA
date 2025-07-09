@@ -740,8 +740,8 @@ with tab2:
                 st.warning(f"Invalid change_pct for {symbol}: {change}")
         
         # Debug output
-        st.write(f"Valid Symbols: {valid_symbols}")
-        st.write(f"Valid Changes: {changes}")
+        #st.write(f"Valid Symbols: {valid_symbols}")
+        #st.write(f"Valid Changes: {changes}")
         
         if not valid_symbols:
             st.warning("No valid stocks available for portfolio performance chart")
