@@ -28,18 +28,17 @@ def calculate_rsi(data, periods=14):
     loss = -delta.where(delta < 0, 0)
     avg_gain = gain.rolling(window=periods, min_periods=1).mean()
     avg_loss = loss.rolling(window=periods, min_periods=1).mean()
-    rs = avg_gain / avg_loss.where(avg_loss != 0, 1e-10)  # Avoid division by zero
+    rs = avg_gain / avg_loss.where(avg_loss != 0, 1e-10)
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
 # Custom functions
 def get_stock_data(symbol, interval):
     try:
-        # Map non-standard intervals to supported ones and resample
         supported_intervals = {'1m': '1m', '2m': '2m', '3m': '1m', '5m': '5m', '10m': '1m', 
                               '15m': '15m', '30m': '30m', '45m': '1m', '1h': '1h', 
                               '2h': '1h', '3h': '1h', '4h': '1h'}
-        period = '1d' if interval in ['1m', '2m', '3m'] else '7d'
+        period = '7d' if interval in ['2h', '3h', '4h'] else '1d'  # Extend for SMA/RSI in longer intervals
         fetch_interval = supported_intervals[interval]
         
         stock = yf.Ticker(symbol)
@@ -63,8 +62,14 @@ def get_stock_data(symbol, interval):
             df = df.resample(f'{hours}H').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 
                                              'Close': 'last', 'Volume': 'sum'}).dropna()
         
+        # Filter for current trading day
+        local_tz = pytz.timezone('America/New_York')
+        df = df.tz_convert(local_tz)
+        today = datetime.now(local_tz).date()
+        df = df[df.index.date == today]
+        
         if df.empty or len(df) < 2:
-            st.error(f"No data after resampling for {symbol} with interval {interval}")
+            st.error(f"No data for {symbol} on current trading day with interval {interval}")
             return None
         
         current_price = df['Close'].iloc[-1]
@@ -72,8 +77,7 @@ def get_stock_data(symbol, interval):
         current_volume = df['Volume'].iloc[-1]
         previous_volume = df['Volume'].iloc[-2]
         timestamp = df.index[-1]
-        local_tz = pytz.timezone('America/New_York')
-        timestamp_local = timestamp.tz_convert(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
+        timestamp_local = timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')
         change_pct = round(((current_price - previous_price) / previous_price) * 100, 3)
         volume_change_pct = round(((current_volume - previous_volume) / previous_volume) * 100, 3) if previous_volume > 0 else 0
         return {
@@ -127,6 +131,8 @@ def create_candlestick_chart(df, symbol, interval):
         if len(df) >= 50:
             sma = df['Close'].rolling(window=50).mean()
             fig.add_trace(go.Scatter(x=df.index, y=sma, name='50-Period SMA', line=dict(color='orange', width=2)), row=1, col=1)
+        else:
+            st.warning(f"Insufficient data for 50-period SMA ({len(df)} candles < 50)")
         
         colors = ['green' if df['Volume'].iloc[i] >= df['Volume'].iloc[max(0, i-1)] else 'red' for i in range(len(df))]
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume', marker_color=colors), row=2, col=1)
@@ -136,6 +142,8 @@ def create_candlestick_chart(df, symbol, interval):
             fig.add_trace(go.Scatter(x=df.index, y=rsi, name='RSI (14)', line=dict(color='purple', width=2)), row=3, col=1)
             fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
             fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
+        else:
+            st.warning(f"Insufficient data for RSI ({len(df)} candles < 14)")
         
         fig.update_layout(
             title=f"{symbol} Candlestick Chart ({interval})",
@@ -247,7 +255,8 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
         elif rsi < 30:
             recommendations.append("RSI below 30; stock may be oversold, potential buying opportunity.")
     
-    return recommendations if recommendations else ["No specific recommendations; monitor market conditions."]
+    recommendations.append("Note: These are not financial advice; consult a professional.")
+    return recommendations if recommendations else ["No specific recommendations; monitor market conditions. Note: These are not financial advice; consult a professional."]
 
 def generate_alerts(symbol, change_pct, volume_change_pct):
     alerts = []
@@ -273,7 +282,6 @@ def display_clock():
         clock_placeholder.markdown(f"<div style='position: absolute; top: 10px; right: 10px; font-size: 16px; font-weight: bold;'>Clock: {current_time}</div>", unsafe_allow_html=True)
         time.sleep(1)
 
-# Start clock
 clock_placeholder = st.empty()
 threading.Thread(target=display_clock, daemon=True).start()
 
@@ -327,7 +335,7 @@ with st.sidebar:
         options=list(interval_options.keys()),
         format_func=lambda x: interval_options[x],
         index=3,  # Default to 5m
-        help="Each candle represents this time period"
+        help="Each candle represents this time period (intraday)"
     )
     
     refresh_interval = st.number_input(
@@ -441,7 +449,6 @@ with tab1:
             with st.container():
                 st.subheader(f"📊 {symbol}")
                 
-                # Alerts
                 alerts = generate_alerts(symbol, stock_info['change_pct'], stock_info['volume_change_pct'])
                 for alert in alerts:
                     st.warning(f"⚠️ {alert}")
@@ -488,12 +495,23 @@ with tab2:
         symbols = list(st.session_state.watchlist.keys())
         changes = [st.session_state.watchlist[symbol]['change_pct'] for symbol in symbols]
         
+        # Debug output
+        if not symbols or not changes:
+            st.warning("No valid data available for portfolio performance chart")
+        else:
+            st.write(f"Symbols: {symbols}")
+            st.write(f"Changes: {changes}")
+        
         if filter_option == "Top Gainers":
             sorted_pairs = sorted(zip(symbols, changes), key=lambda x: x[1], reverse=True)[:3]
             symbols, changes = zip(*sorted_pairs) if sorted_pairs else ([], [])
+            if not sorted_pairs:
+                st.warning("No qualifying stocks for Top Gainers")
         elif filter_option == "Top Losers":
             sorted_pairs = sorted(zip(symbols, changes), key=lambda x: x[1])[:3]
             symbols, changes = zip(*sorted_pairs) if sorted_pairs else ([], [])
+            if not sorted_pairs:
+                st.warning("No qualifying stocks for Top Losers")
         
         fig = create_portfolio_chart(symbols, changes)
         if fig:
