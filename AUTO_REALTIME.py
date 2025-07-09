@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 import pytz
 import threading
+from streamlit_autorefresh import st_autorefresh
 
 # Initialize session state
 if 'watchlist' not in st.session_state:
@@ -16,13 +17,11 @@ if 'last_update' not in st.session_state:
 if 'auto_refresh' not in st.session_state:
     st.session_state.auto_refresh = False
 if 'refresh_interval' not in st.session_state:
-    st.session_state.refresh_interval = 60
+    st.session_state.refresh_interval = 10  # Default to 10 seconds
 if 'last_refresh_time' not in st.session_state:
     st.session_state.last_refresh_time = time.time()
 if 'refresh_count' not in st.session_state:
     st.session_state.refresh_count = 0
-if 'debug_message' not in st.session_state:
-    st.session_state.debug_message = "Auto-refresh not checked yet."
 
 # Custom functions
 def get_stock_data(symbol, interval, period='1d'):
@@ -80,6 +79,32 @@ def create_candlestick_chart(df, symbol, interval):
             xaxis_title="Time",
             xaxis_rangeslider_visible=False,
             template="plotly_white"
+        )
+        return fig
+    return None
+
+def create_volume_trend_chart(df, symbol):
+    if df is not None and not df.empty and len(df) >= 2:
+        volume_data = df['Volume'].tail(10)
+        labels = volume_data.index.tz_convert(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M')
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=labels,
+            y=volume_data,
+            mode='lines+markers',
+            name='Volume',
+            line=dict(color='#2196F3', width=2),
+            fill='tozeroy',
+            fillcolor='rgba(33, 150, 243, 0.2)'
+        ))
+        
+        fig.update_layout(
+            title=f"Volume Trend for {symbol} (Last 10 Periods)",
+            xaxis_title="Time",
+            yaxis_title="Volume",
+            template="plotly_white",
+            showlegend=True
         )
         return fig
     return None
@@ -192,8 +217,6 @@ with st.sidebar:
                     st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
             st.session_state.last_refresh_time = time.time()
             st.session_state.refresh_count += 1
-            st.session_state.debug_message = f"Manual refresh at {datetime.now(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M:%S %Z')}"
-            print(st.session_state.debug_message)  # Console log
         st.success("✅ All stocks refreshed!")
         st.rerun()
 
@@ -207,8 +230,7 @@ with st.sidebar:
     st.markdown(f"**Auto-Refresh Enabled:** {'Yes' if st.session_state.auto_refresh else 'No'}")
     st.markdown(f"**Last Refresh:** {datetime.fromtimestamp(st.session_state.last_refresh_time).astimezone(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M:%S %Z') if st.session_state.last_refresh_time else 'N/A'}")
     st.markdown(f"**Refresh Count:** {st.session_state.refresh_count}")
-    st.markdown(f"**Debug:** {st.session_state.debug_message}")
-    
+
     # Volume Trend Selection
     st.subheader("📈 Volume Trend")
     selected_volume_stock = st.selectbox(
@@ -219,17 +241,13 @@ with st.sidebar:
 
 # Auto-refresh logic
 if st.session_state.auto_refresh:
-    current_time = time.time()
-    time_elapsed = current_time - st.session_state.last_refresh_time
-    if time_elapsed >= st.session_state.refresh_interval:
+    # Convert interval to milliseconds (10 seconds = 10000 ms)
+    refresh_count = st_autorefresh(interval=st.session_state.refresh_interval * 1000, key="stockrefresh")
+    if refresh_count > 0:  # Skip first run to avoid immediate refresh
         with st.spinner("🔄 Auto-refreshing stock data..."):
             any_data_updated = False
             for symbol in list(st.session_state.watchlist.keys()):
-                # Retry once on failure
                 data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'])
-                if data is None:
-                    time.sleep(1)  # Brief pause before retry
-                    data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'])
                 if data is not None:
                     st.session_state.watchlist[symbol]['data'] = data['data']
                     st.session_state.watchlist[symbol]['last_update'] = data['timestamp']
@@ -242,16 +260,10 @@ if st.session_state.auto_refresh:
                     st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
                     any_data_updated = True
             if any_data_updated:
-                st.session_state.last_refresh_time = current_time
+                st.session_state.last_refresh_time = time.time()
                 st.session_state.refresh_count += 1
-                st.session_state.debug_message = f"Auto-refresh successful at {datetime.now(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M:%S %Z')}"
             else:
-                st.session_state.debug_message = f"Auto-refresh at {datetime.now(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M:%S %Z')} failed: No data updated"
-            print(st.session_state.debug_message)  # Console log
-        st.rerun()
-    else:
-        st.session_state.debug_message = f"Auto-refresh check at {datetime.now(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M:%S %Z')}: {st.session_state.refresh_interval - time_elapsed:.2f} seconds remaining"
-        print(st.session_state.debug_message)  # Console log
+                st.warning("Auto-refresh failed: No data updated for any stock")
 
 # Main content area
 if not st.session_state.watchlist:
@@ -350,57 +362,9 @@ if st.session_state.watchlist and selected_volume_stock in st.session_state.watc
     st.markdown("Volume over the last 10 periods")
     
     df = st.session_state.watchlist[selected_volume_stock]['data']
-    if len(df) >= 2:
-        volume_data = df['Volume'].tail(10).tolist()
-        labels = df.index[-10:].tz_convert(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M').tolist()
-        
-        st.markdown("""
-            <canvas id="volumeChart"></canvas>
-            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-            <script>
-                const ctxVolume = document.getElementById('volumeChart').getContext('2d');
-                new Chart(ctxVolume, {
-                    type: 'line',
-                    data: {
-                        labels: """ + str(labels) + """,
-                        datasets: [{
-                            label: 'Volume',
-                            data: """ + str(volume_data) + """,
-                            borderColor: '#2196F3',
-                            backgroundColor: 'rgba(33, 150, 243, 0.2)',
-                            fill: true,
-                            tension: 0.1
-                        }]
-                    },
-                    options: {
-                        scales: {
-                            y: {
-                                title: {
-                                    display: true,
-                                    text: 'Volume'
-                                },
-                                beginAtZero: false
-                            },
-                            x: {
-                                title: {
-                                    display: true,
-                                    text: 'Time'
-                                }
-                            }
-                        },
-                        plugins: {
-                            legend: {
-                                display: true
-                            },
-                            title: {
-                                display: true,
-                                text: 'Volume Trend'
-                            }
-                        }
-                    }
-                });
-            </script>
-        """, unsafe_allow_html=True)
+    fig = create_volume_trend_chart(df, selected_volume_stock)
+    if fig:
+        st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("Not enough data for volume trend chart (minimum 2 periods required)")
 
