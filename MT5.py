@@ -27,10 +27,14 @@ if 'data_source' not in st.session_state:
 
 # Initialize MT5
 def initialize_mt5():
-    if not mt5.initialize():
-        st.error("❌ Failed to initialize MetaTrader5. Ensure MT5 terminal is running and logged in.")
+    try:
+        if not mt5.initialize():
+            st.error("❌ Failed to initialize MetaTrader5. Ensure MT5 terminal is running and logged in.")
+            return False
+        return True
+    except Exception as e:
+        st.error(f"❌ MT5 initialization error: {str(e)}")
         return False
-    return True
 
 # Custom RSI calculation
 def calculate_rsi(data, periods=14):
@@ -654,7 +658,7 @@ threading.Thread(target=display_clock, daemon=True).start()
 
 # Title and description
 st.title("📈 Real-Time Market Monitoring Dashboard")
-st.markdown("Track stocks, forex, and commodities with interactive candlestick charts, breakout patterns, and candlestick signals")
+st.markdown("Track stocks, forex, and commodities with interactive candlestick charts, breakout patterns, and candlestick signals.")
 
 # Auto-refresh logic
 if st.session_state.auto_refresh:
@@ -690,14 +694,14 @@ with st.sidebar:
         "Select Data Source",
         options=["yfinance", "MetaTrader5"],
         index=0 if st.session_state.data_source == "yfinance" else 1,
-        help="Choose Yahoo Finance for stocks or MetaTrader5 for stocks, forex, commodities, etc."
+        help="Choose Yahoo Finance for stocks or MetaTrader5 for stocks, forex, commodities, etc. Note: MT5 stock symbols may have suffixes (e.g., AAPL#, AAPL.cash)."
     )
     st.session_state.data_source = data_source
     
     symbol_input = st.text_input(
-        "Enter Symbol (e.g., AAPL for yfinance, EURUSD or AAPL# for MT5)",
-        placeholder="e.g., AAPL or EURUSD",
-        help="Enter a stock symbol for yfinance or instrument for MT5 (e.g., EURUSD, AAPL#)"
+        "Enter Symbol",
+        placeholder="e.g., AAPL (yfinance), EURUSD or AAPL# (MT5)",
+        help="Enter a stock symbol for yfinance (e.g., AAPL) or instrument for MT5 (e.g., EURUSD, AAPL#). Check MT5 Market Watch for broker-specific symbols."
     )
     
     interval_options = {
@@ -716,7 +720,7 @@ with st.sidebar:
     extended_hours = st.toggle(
         "Extended Hours (Pre/Post)",
         value=False,
-        help="Include pre/post-market data for yfinance (4:00 AM–8:00 PM EDT)"
+        help="Include pre/post-market data for yfinance (4:00 AM–8:00 PM EDT). Less relevant for MT5 forex (24/5)."
     )
     
     refresh_interval = st.number_input(
@@ -739,7 +743,7 @@ with st.sidebar:
             symbol = symbol_input.upper().strip()
             if symbol:
                 if st.session_state.data_source == "MetaTrader5" and (not initialize_mt5() or not mt5.symbol_info(symbol)):
-                    st.error(f"❌ Invalid MT5 symbol: {symbol}")
+                    st.error(f"❌ Invalid MT5 symbol: {symbol}. Check MT5 Market Watch for correct symbol (e.g., AAPL#, EURUSD).")
                 else:
                     data = get_stock_data(symbol, selected_interval, extended_hours, st.session_state.data_source)
                     if data is not None:
