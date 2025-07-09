@@ -224,7 +224,7 @@ def style_patterns_df(df):
     return df.style.apply(color_rows, axis=1).format({'Confidence': '{:.1f}'})
 
 # Custom functions
-def get_stock_data(symbol, interval):
+def get_stock_data(symbol, interval, extended_hours=False):
     try:
         supported_intervals = {'1m': '1m', '2m': '2m', '3m': '1m', '5m': '5m', '10m': '1m', 
                               '15m': '15m', '30m': '30m', '45m': '1m', '1h': '1h', 
@@ -257,10 +257,13 @@ def get_stock_data(symbol, interval):
         local_tz = pytz.timezone('America/New_York')
         df = df.tz_convert(local_tz)
         today = datetime.now(local_tz).date()
-        df = df[df.index.date == today]
+        if extended_hours:
+            df = df.between_time(dt_time(4, 0), dt_time(20, 0))  # Pre-market and post-market
+        else:
+            df = df[df.index.date == today]
         
         if df.empty or len(df) < 2:
-            st.error(f"No data for {symbol} on current trading day with interval {interval}")
+            st.warning(f"No data for {symbol} on current trading day with interval {interval}")
             return None
         
         current_price = df['Close'].iloc[-1]
@@ -295,11 +298,10 @@ def get_volume_trend_data(symbol):
             return None
         local_tz = pytz.timezone('America/New_York')
         df = df.tz_convert(local_tz)
-        market_open = dt_time(9, 30)
-        market_close = dt_time(16, 0)
-        df = df.between_time(market_open, market_close)
+        today = datetime.now(local_tz).date()
+        df = df[df.index.date == today]  # Show last trading day's data
         if df.empty:
-            st.error(f"No data for {symbol} during market hours (9:30 AM–4:00 PM EDT)")
+            st.warning(f"No data for {symbol} on current trading day")
             return None
         return df
     except Exception as e:
@@ -386,7 +388,7 @@ def create_volume_trend_chart(df, symbol):
         ))
         
         fig.update_layout(
-            title=f"Volume Trend for {symbol} (Market Hours: 9:30 AM–4:00 PM EDT)",
+            title=f"Volume Trend for {symbol} (Last Trading Day)",
             xaxis_title="Time (EDT)",
             yaxis_title="Volume",
             template="plotly_white",
@@ -514,7 +516,7 @@ if st.session_state.auto_refresh:
         with st.spinner("🔄 Auto-refreshing stock data..."):
             any_data_updated = False
             for symbol in list(st.session_state.watchlist.keys()):
-                data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'])
+                data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'], extended_hours=True)
                 if data is not None:
                     st.session_state.watchlist[symbol]['data'] = data['data']
                     st.session_state.watchlist[symbol]['last_update'] = data['timestamp']
@@ -556,6 +558,12 @@ with st.sidebar:
         help="Each candle represents this time period (intraday)"
     )
     
+    extended_hours = st.toggle(
+        "Include Extended Hours (Pre/Post-Market)",
+        value=False,
+        help="Include pre-market (4:00 AM–9:30 AM EDT) and post-market (4:00 PM–8:00 PM EDT) data"
+    )
+    
     refresh_interval = st.number_input(
         "Auto-Refresh Interval (seconds)",
         min_value=10,
@@ -577,7 +585,7 @@ with st.sidebar:
         if symbol_input:
             symbol = symbol_input.upper().strip()
             if symbol:
-                data = get_stock_data(symbol, selected_interval)
+                data = get_stock_data(symbol, selected_interval, extended_hours)
                 if data is not None:
                     st.session_state.watchlist[symbol] = {
                         'data': data['data'],
@@ -603,7 +611,7 @@ with st.sidebar:
     if st.button("🔄 Refresh All", key="refresh_all"):
         with st.spinner("🔄 Refreshing stock data..."):
             for symbol in list(st.session_state.watchlist.keys()):
-                data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'])
+                data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'], extended_hours)
                 if data is not None:
                     st.session_state.watchlist[symbol]['data'] = data['data']
                     st.session_state.watchlist[symbol]['last_update'] = data['timestamp']
@@ -633,7 +641,7 @@ with st.sidebar:
     selected_volume_stock = st.selectbox(
         "Select Stock for Volume Trend",
         options=list(st.session_state.watchlist.keys()) if st.session_state.watchlist else ["No stocks available"],
-        help="Select a stock to view its volume trend (9:30 AM–4:00 PM EDT)"
+        help="Select a stock to view its volume trend (last trading day)"
     )
 
 # Main content with tabs
@@ -740,8 +748,8 @@ with tab2:
                 st.warning(f"Invalid change_pct for {symbol}: {change}")
         
         # Debug output
-        #st.write(f"Valid Symbols: {valid_symbols}")
-        #st.write(f"Valid Changes: {changes}")
+        st.write(f"Valid Symbols: {valid_symbols}")
+        st.write(f"Valid Changes: {changes}")
         
         if not valid_symbols:
             st.warning("No valid stocks available for portfolio performance chart")
@@ -758,14 +766,14 @@ with tab3:
     st.header("Volume Trend & Recommendations")
     if st.session_state.watchlist and selected_volume_stock in st.session_state.watchlist:
         st.subheader(f"📈 Volume Trend for {selected_volume_stock}")
-        st.markdown("Volume from 9:30 AM to 4:00 PM EDT")
+        st.markdown("Volume from last trading day")
         
         df_volume = get_volume_trend_data(selected_volume_stock)
         fig = create_volume_trend_chart(df_volume, selected_volume_stock)
         if fig:
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("Not enough data for volume trend chart (9:30 AM–4:00 PM EDT)")
+            st.warning("Not enough data for volume trend chart (last trading day)")
         
         st.subheader("Recommendations")
         df_candlestick = st.session_state.watchlist[selected_volume_stock]['data']
