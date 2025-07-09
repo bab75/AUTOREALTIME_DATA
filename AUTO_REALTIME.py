@@ -131,6 +131,28 @@ def create_volume_trend_chart(df, symbol):
         return fig
     return None
 
+def create_portfolio_chart(symbols, changes):
+    if symbols and changes and all(isinstance(c, (int, float)) for c in changes):
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=symbols,
+            y=changes,
+            marker_color=['#4CAF50' if c >= 0 else '#F44336' for c in changes],
+            marker_line_color=['#388E3C' if c >= 0 else '#D32F2F' for c in changes],
+            marker_line_width=1
+        ))
+        
+        fig.update_layout(
+            title="Portfolio Performance",
+            xaxis_title="Stocks",
+            yaxis_title="Percentage Change (%)",
+            template="plotly_white",
+            showlegend=False,
+            yaxis=dict(zeroline=True, zerolinecolor='black', zerolinewidth=1)
+        )
+        return fig
+    return None
+
 # Configure page
 st.set_page_config(
     page_title="Real-Time Stock Dashboard",
@@ -331,52 +353,11 @@ if st.session_state.watchlist:
     symbols = list(st.session_state.watchlist.keys())
     changes = [st.session_state.watchlist[symbol]['change_pct'] for symbol in symbols]
     
-    st.markdown("""
-        <canvas id="portfolioChart"></canvas>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        <script>
-            const ctx = document.getElementById('portfolioChart').getContext('2d');
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: """ + str(symbols) + """,
-                    datasets: [{
-                        label: 'Percentage Change (%)',
-                        data: """ + str(changes) + """,
-                        backgroundColor: """ + str(["#4CAF50" if change >= 0 else "#F44336" for change in changes]) + """,
-                        borderColor: """ + str(["#388E3C" if change >= 0 else "#D32F2F" for change in changes]) + """,
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    scales: {
-                        y: {
-                            title: {
-                                display: true,
-                                text: 'Percentage Change (%)'
-                            },
-                            beginAtZero: true
-                        },
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Stocks'
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        title: {
-                            display: true,
-                            text: 'Portfolio Performance'
-                        }
-                    }
-                }
-            });
-        </script>
-    """, unsafe_allow_html=True)
+    fig = create_portfolio_chart(symbols, changes)
+    if fig:
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("No valid data available for portfolio performance chart")
 
 # Volume Trend Analysis
 if st.session_state.watchlist and selected_volume_stock in st.session_state.watchlist:
