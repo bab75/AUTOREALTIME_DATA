@@ -40,8 +40,8 @@ def get_stock_data(symbol, interval, period='1d'):
         timestamp = df.index[-1]
         local_tz = pytz.timezone('America/New_York')
         timestamp_local = timestamp.tz_convert(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
-        change_pct = ((current_price - previous_price) / previous_price) * 100
-        volume_change_pct = ((current_volume - previous_volume) / previous_volume) * 100 if previous_volume > 0 else 0
+        change_pct = round(((current_price - previous_price) / previous_price) * 100, 3)
+        volume_change_pct = round(((current_volume - previous_volume) / previous_volume) * 100, 3) if previous_volume > 0 else 0
         return {
             'data': df,
             'price': current_price,
@@ -91,6 +91,11 @@ def create_candlestick_chart(df, symbol, interval):
                                     name=symbol),
                      row=1, col=1)
         
+        # Add 50-period SMA
+        if len(df) >= 50:
+            sma = df['Close'].rolling(window=50).mean()
+            fig.add_trace(go.Scatter(x=df.index, y=sma, name='50-Period SMA', line=dict(color='orange', width=2)), row=1, col=1)
+        
         colors = ['green' if df['Volume'].iloc[i] >= df['Volume'].iloc[max(0, i-1)] else 'red' for i in range(len(df))]
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume', marker_color=colors), row=2, col=1)
         
@@ -139,19 +144,71 @@ def create_portfolio_chart(symbols, changes):
             y=changes,
             marker_color=['#4CAF50' if c >= 0 else '#F44336' for c in changes],
             marker_line_color=['#388E3C' if c >= 0 else '#D32F2F' for c in changes],
-            marker_line_width=1
+            marker_line_width=1,
+            text=[f"{c:.3f}%" for c in changes],  # Show 3 decimals with % in hover
+            textposition='auto'
         ))
         
         fig.update_layout(
             title="Portfolio Performance",
             xaxis_title="Stocks",
-            yaxis_title="Percentage Change (%)",
+            yaxis_title="Percentage Change",
             template="plotly_white",
             showlegend=False,
             yaxis=dict(zeroline=True, zerolinecolor='black', zerolinewidth=1)
         )
         return fig
     return None
+
+def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
+    recommendations = []
+    
+    # Volume Trend Analysis
+    if df_volume is not None and not df_volume.empty:
+        volume_data = df_volume['Volume']
+        volume_changes = volume_data.pct_change() * 100
+        spike_threshold = 50  # 50% increase
+        spikes = volume_changes[volume_changes > spike_threshold]
+        if not spikes.empty:
+            spike_times = spikes.index.strftime('%H:%M')
+            recommendations.append(f"High volume spikes detected at {', '.join(spike_times)} EDT, indicating strong buying/selling pressure.")
+    
+    # Performance Analysis
+    if isinstance(change_pct, (int, float)):
+        if change_pct > 2:
+            recommendations.append(f"{symbol} (+{change_pct:.3f}%) shows bullish momentum; consider holding or buying on dips.")
+        elif change_pct < -2:
+            recommendations.append(f"{symbol} ({change_pct:+.3f}%) shows bearish momentum; consider selling or waiting for a reversal.")
+        else:
+            recommendations.append(f"{symbol} ({change_pct:+.3f}%) is stable; monitor for breakout patterns.")
+    
+    # Candlestick Pattern Analysis
+    if df_candlestick is not None and len(df_candlestick) >= 2:
+        last_candle = df_candlestick.iloc[-1]
+        prev_candle = df_candlestick.iloc[-2]
+        open_last, close_last, high_last, low_last = last_candle['Open'], last_candle['Close'], last_candle['High'], last_candle['Low']
+        open_prev, close_prev, high_prev, low_prev = prev_candle['Open'], prev_candle['Close'], prev_candle['High'], prev_candle['Low']
+        
+        # Bullish Engulfing
+        if close_prev < open_prev and close_last > open_last and close_last > open_prev and open_last < close_prev:
+            recommendations.append("Bullish engulfing pattern detected; potential upward movement expected.")
+        # Bearish Engulfing
+        elif close_prev > open_prev and close_last < open_last and close_last < open_prev and open_last > close_prev:
+            recommendations.append("Bearish engulfing pattern detected; potential downward movement expected.")
+        # Doji (indecision)
+        elif abs(close_last - open_last) <= (high_last - low_last) * 0.1:
+            recommendations.append("Doji pattern detected; market indecision, watch for breakout.")
+    
+    # SMA Trend Analysis
+    if df_candlestick is not None and len(df_candlestick) >= 50:
+        sma = df_candlestick['Close'].rolling(window=50).mean().iloc[-1]
+        current_price = df_candlestick['Close'].iloc[-1]
+        if current_price > sma:
+            recommendations.append("Price is above 50-period SMA; bullish trend indicated.")
+        elif current_price < sma:
+            recommendations.append("Price is below 50-period SMA; bearish trend indicated.")
+    
+    return recommendations if recommendations else ["No specific recommendations; monitor market conditions."]
 
 # Configure page
 st.set_page_config(
@@ -309,67 +366,84 @@ with st.sidebar:
         help="Select a stock to view its volume trend (9:30 AM–4:00 PM EDT)"
     )
 
-# Main content area
-if not st.session_state.watchlist:
-    st.info("📝 Add stocks to your watchlist using the sidebar to get started!")
-else:
-    for symbol, stock_info in st.session_state.watchlist.items():
-        with st.container():
-            st.subheader(f"📊 {symbol}")
-            
-            st.markdown(f"**Last Updated:** {stock_info['last_update']}")
-            
-            st.markdown(f"""
-                <div style="position: relative; min-height: 60px;">
-                    <div style="position: absolute; top: 0; right: 0; text-align: right;">
-                        <div style="font-size: 18px; font-weight: bold; color: {'green' if stock_info['change_pct'] >= 0 else 'red'};">Current Price: ${stock_info['price']:.2f}</div>
-                        <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['change_pct'] >= 0 else 'red'};">Change: {stock_info['change_pct']:+.2f}%</div>
+# Main content with tabs
+tab1, tab2, tab3 = st.tabs(["Watchlist", "Portfolio Overview", "Volume Trend & Recommendations"])
+
+with tab1:
+    st.header("Watchlist")
+    if not st.session_state.watchlist:
+        st.info("📝 Add stocks to your watchlist using the sidebar to get started!")
+    else:
+        for symbol, stock_info in st.session_state.watchlist.items():
+            with st.container():
+                st.subheader(f"📊 {symbol}")
+                
+                st.markdown(f"**Last Updated:** {stock_info['last_update']}")
+                
+                st.markdown(f"""
+                    <div style="position: relative; min-height: 60px;">
+                        <div style="position: absolute; top: 0; right: 0; text-align: right;">
+                            <div style="font-size: 18px; font-weight: bold; color: {'green' if stock_info['change_pct'] >= 0 else 'red'};">Current Price: ${stock_info['price']:.2f}</div>
+                            <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['change_pct'] >= 0 else 'red'};">Change: {stock_info['change_pct']:+.3f}%</div>
+                        </div>
                     </div>
-                </div>
-            """, unsafe_allow_html=True)
-            
-            st.metric("📈 Open", f"${stock_info['open']:.2f}")
-            st.metric("📊 High", f"${stock_info['high']:.2f}")
-            st.metric("📉 Low", f"${stock_info['low']:.2f}")
-            st.markdown(f"""
-                <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['volume_change_pct'] >= 0 else 'red'};">
-                    📦 Volume: {int(stock_info['volume']):,}
-                </div>
-            """, unsafe_allow_html=True)
-            
-            fig = create_candlestick_chart(stock_info['data'], symbol, stock_info['interval'])
-            if fig:
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("No data available for chart")
-            
-            st.divider()
+                """, unsafe_allow_html=True)
+                
+                st.metric("📈 Open", f"${stock_info['open']:.2f}")
+                st.metric("📊 High", f"${stock_info['high']:.2f}")
+                st.metric("📉 Low", f"${stock_info['low']:.2f}")
+                st.markdown(f"""
+                    <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['volume_change_pct'] >= 0 else 'red'};">
+                        📦 Volume: {int(stock_info['volume']):,}
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                fig = create_candlestick_chart(stock_info['data'], symbol, stock_info['interval'])
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("No data available for chart")
+                
+                st.divider()
 
-# Portfolio Performance Overview
-if st.session_state.watchlist:
-    st.subheader("📊 Portfolio Performance Overview")
-    st.markdown("Percentage change for all stocks in the watchlist")
-    
-    symbols = list(st.session_state.watchlist.keys())
-    changes = [st.session_state.watchlist[symbol]['change_pct'] for symbol in symbols]
-    
-    fig = create_portfolio_chart(symbols, changes)
-    if fig:
-        st.plotly_chart(fig, use_container_width=True)
+with tab2:
+    st.header("Portfolio Performance Overview")
+    if st.session_state.watchlist:
+        st.markdown("Percentage change for all stocks in the watchlist")
+        
+        symbols = list(st.session_state.watchlist.keys())
+        changes = [st.session_state.watchlist[symbol]['change_pct'] for symbol in symbols]
+        
+        fig = create_portfolio_chart(symbols, changes)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("No valid data available for portfolio performance chart")
     else:
-        st.warning("No valid data available for portfolio performance chart")
+        st.info("No stocks in watchlist to display portfolio performance.")
 
-# Volume Trend Analysis
-if st.session_state.watchlist and selected_volume_stock in st.session_state.watchlist:
-    st.subheader(f"📈 Volume Trend for {selected_volume_stock}")
-    st.markdown("Volume from 9:30 AM to 4:00 PM EDT")
-    
-    df = get_volume_trend_data(selected_volume_stock)
-    fig = create_volume_trend_chart(df, selected_volume_stock)
-    if fig:
-        st.plotly_chart(fig, use_container_width=True)
+with tab3:
+    st.header("Volume Trend & Recommendations")
+    if st.session_state.watchlist and selected_volume_stock in st.session_state.watchlist:
+        st.subheader(f"📈 Volume Trend for {selected_volume_stock}")
+        st.markdown("Volume from 9:30 AM to 4:00 PM EDT")
+        
+        df_volume = get_volume_trend_data(selected_volume_stock)
+        fig = create_volume_trend_chart(df_volume, selected_volume_stock)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Not enough data for volume trend chart (9:30 AM–4:00 PM EDT)")
+        
+        # Recommendations
+        st.subheader("Recommendations")
+        df_candlestick = st.session_state.watchlist[selected_volume_stock]['data']
+        change_pct = st.session_state.watchlist[selected_volume_stock]['change_pct']
+        recommendations = generate_recommendations(selected_volume_stock, df_volume, change_pct, df_candlestick)
+        for rec in recommendations:
+            st.markdown(f"- {rec}")
     else:
-        st.warning("Not enough data for volume trend chart (9:30 AM–4:00 PM EDT)")
+        st.info("Select a stock from the watchlist to view volume trend and recommendations.")
 
 # Footer
 st.markdown("---")
