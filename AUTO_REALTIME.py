@@ -9,6 +9,8 @@ import pytz
 import threading
 from streamlit_autorefresh import st_autorefresh
 import numpy as np
+from polygon import RESTClient
+import requests
 
 # Initialize session state
 if 'watchlist' not in st.session_state:
@@ -16,11 +18,17 @@ if 'watchlist' not in st.session_state:
 if 'auto_refresh' not in st.session_state:
     st.session_state.auto_refresh = False
 if 'refresh_interval' not in st.session_state:
-    st.session_state.refresh_interval = 60  # Default to 60 seconds
+    st.session_state.refresh_interval = 60
 if 'last_refresh_time' not in st.session_state:
     st.session_state.last_refresh_time = time.time()
 if 'refresh_count' not in st.session_state:
     st.session_state.refresh_count = 0
+if 'data_source' not in st.session_state:
+    st.session_state.data_source = 'Yahoo Finance'
+if 'polygon_api_key' not in st.session_state:
+    st.session_state.polygon_api_key = ''
+if 'polygon_api_calls' not in st.session_state:
+    st.session_state.polygon_api_calls = []  # Track API calls with timestamps
 
 # Custom RSI calculation
 def calculate_rsi(data, periods=14):
@@ -237,8 +245,153 @@ def style_patterns_df(df):
             return ['background-color: #FFFFFF'] * len(row)
     return df.style.apply(color_rows, axis=1).format({'Confidence': '{:.1f}'})
 
-# Custom functions
-def get_stock_data(symbol, interval, extended_hours=False):
+# Check Polygon.io API rate limit
+def check_polygon_rate_limit():
+    now = time.time()
+    # Remove calls older than 60 seconds
+    st.session_state.polygon_api_calls = [t for t in st.session_state.polygon_api_calls if now - t < 60]
+    return len(st.session_state.polygon_api_calls) < 5
+
+# Fetch data from Polygon.io
+def get_polygon_data(symbol, interval, api_key, extended_hours=False):
+    try:
+        supported_intervals = {'1m': '1m', '2m': '2m', '3m': '1m', '5m': '5m', '10m': '1m', 
+                              '15m': '15m', '30m': '30m', '45m': '1m', '1h': '1h', 
+                              '2h': '1h', '3h': '1h', '4h': '1h'}
+        fetch_interval = supported_intervals[interval]
+        period = '7d' if interval in ['2h', '3h', '4h'] else '1d'
+        
+        if not check_polygon_rate_limit():
+            st.error(f"Polygon.io rate limit exceeded (5 calls/minute). Please wait or switch to Yahoo Finance.")
+            return None
+        
+        client = RESTClient(api_key=api_key)
+        local_tz = pytz.timezone('America/New_York')
+        today = datetime.now(local_tz).date()
+        yesterday = today - timedelta(days=1)
+        from_date = today.strftime('%Y-%m-%d') if period == '1d' else (today - timedelta(days=7)).strftime('%Y-%m-%d')
+        to_date = today.strftime('%Y-%m-%d')
+        
+        # Fetch aggregates
+        aggs = []
+        for a in client.list_aggs(ticker=symbol, multiplier=1, timespan='minute', 
+                                from_=from_date, to=to_date, limit=50000):
+            aggs.append({
+                'timestamp': pd.to_datetime(a.timestamp, unit='ms').tz_localize('UTC').tz_convert(local_tz),
+                'Open': a.open,
+                'High': a.high,
+                'Low': a.low,
+                'Close': a.close,
+                'Volume': a.volume
+            })
+        st.session_state.polygon_api_calls.append(time.time())
+        
+        if not aggs:
+            st.error(f"No data returned for {symbol} from Polygon.io")
+            return None
+        
+        df = pd.DataFrame(aggs)
+        df.set_index('timestamp', inplace=True)
+        
+        # Filter for current trading day or extended hours
+        if extended_hours:
+            df = df.between_time(dt_time(4, 0), dt_time(20, 0))
+        else:
+            df = df[df.index.date == today].between_time(dt_time(9, 30), dt_time(16, 0))
+        
+        # Validate last candle
+        if not df.empty and len(df) >= 2:
+            last_candle = df.iloc[-1]
+            if last_candle['Open'] == last_candle['High'] == last_candle['Low'] == last_candle['Close']:
+                st.warning(f"Last Polygon.io candle for {symbol} has identical OHLC values (${last_candle['Open']:.2f}), possibly incomplete. Trying to fetch more data...")
+                # Retry with broader range
+                aggs = []
+                for a in client.list_aggs(ticker=symbol, multiplier=1, timespan='minute', 
+                                        from_=(today - timedelta(days=1)).strftime('%Y-%m-%d'), 
+                                        to=to_date, limit=50000):
+                    aggs.append({
+                        'timestamp': pd.to_datetime(a.timestamp, unit='ms').tz_localize('UTC').tz_convert(local_tz),
+                        'Open': a.open,
+                        'High': a.high,
+                        'Low': a.low,
+                        'Close': a.close,
+                        'Volume': a.volume
+                    })
+                st.session_state.polygon_api_calls.append(time.time())
+                df = pd.DataFrame(aggs)
+                df.set_index('timestamp', inplace=True)
+                if extended_hours:
+                    df = df.between_time(dt_time(4, 0), dt_time(20, 0))
+                else:
+                    df = df[df.index.date == today].between_time(dt_time(9, 30), dt_time(16, 0))
+        
+        # Fallback to previous trading day
+        if df.empty or len(df) < 2:
+            df = pd.DataFrame([])
+            aggs = []
+            for a in client.list_aggs(ticker=symbol, multiplier=1, timespan='minute', 
+                                    from_=yesterday.strftime('%Y-%m-%d'), 
+                                    to=yesterday.strftime('%Y-%m-%d'), limit=50000):
+                aggs.append({
+                    'timestamp': pd.to_datetime(a.timestamp, unit='ms').tz_localize('UTC').tz_convert(local_tz),
+                    'Open': a.open,
+                    'High': a.high,
+                    'Low': a.low,
+                    'Close': a.close,
+                    'Volume': a.volume
+                })
+            st.session_state.polygon_api_calls.append(time.time())
+            df = pd.DataFrame(aggs)
+            df.set_index('timestamp', inplace=True)
+            if extended_hours:
+                df = df.between_time(dt_time(4, 0), dt_time(20, 0))
+            else:
+                df = df.between_time(dt_time(9, 30), dt_time(16, 0))
+            
+            if df.empty or len(df) < 2:
+                st.warning(f"No valid Polygon.io data for {symbol} on current or previous trading day with interval {interval}")
+                return None
+        
+        # Final validation
+        last_candle = df.iloc[-1]
+        if last_candle['Open'] == last_candle['High'] == last_candle['Low'] == last_candle['Close']:
+            st.warning(f"Last Polygon.io candle for {symbol} still has identical OHLC values (${last_candle['Open']:.2f}) after retry. Data may be stale or from low-liquidity period.")
+        
+        current_price = df['Close'].iloc[-1]
+        previous_price = df['Close'].iloc[-2]
+        current_volume = df['Volume'].iloc[-1]
+        previous_volume = df['Volume'].iloc[-2]
+        timestamp = df.index[-1]
+        timestamp_local = timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')
+        change_pct = round(((current_price - previous_price) / previous_price) * 100, 3)
+        volume_change_pct = round(((current_volume - previous_volume) / previous_volume) * 100, 3) if previous_volume > 0 else 0
+        
+        # Debug output
+        st.write(f"Debug: Last Polygon.io candle for {symbol} at {timestamp_local}: Open=${last_candle['Open']:.2f}, High=${last_candle['High']:.2f}, Low=${last_candle['Low']:.2f}, Close=${last_candle['Close']:.2f}, Volume={int(last_candle['Volume']):,}")
+        
+        return {
+            'data': df,
+            'price': current_price,
+            'volume': current_volume,
+            'open': df['Open'].iloc[-1],
+            'high': df['High'].iloc[-1],
+            'low': df['Low'].iloc[-1],
+            'change_pct': change_pct,
+            'volume_change_pct': volume_change_pct,
+            'timestamp': timestamp_local
+        }
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 429:
+            st.error(f"Polygon.io rate limit exceeded (5 calls/minute) for {symbol}. Please wait or switch to Yahoo Finance.")
+        else:
+            st.error(f"Error fetching Polygon.io data for {symbol}: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error fetching Polygon.io data for {symbol}: {str(e)}")
+        return None
+
+# Fetch data from Yahoo Finance
+def get_yahoo_data(symbol, interval, extended_hours=False):
     try:
         supported_intervals = {'1m': '1m', '2m': '2m', '3m': '1m', '5m': '5m', '10m': '1m', 
                               '15m': '15m', '30m': '30m', '45m': '1m', '1h': '1h', 
@@ -249,7 +402,7 @@ def get_stock_data(symbol, interval, extended_hours=False):
         stock = yf.Ticker(symbol)
         df = stock.history(period=period, interval=fetch_interval)
         if df.empty or len(df) < 2:
-            st.error(f"No sufficient data for {symbol} with interval {interval}")
+            st.error(f"No sufficient data for {symbol} with interval {interval} from Yahoo Finance")
             return None
         
         # Resample for non-standard intervals
@@ -272,16 +425,15 @@ def get_stock_data(symbol, interval, extended_hours=False):
         df = df.tz_convert(local_tz)
         today = datetime.now(local_tz).date()
         if extended_hours:
-            df = df.between_time(dt_time(4, 0), dt_time(20, 0))  # Pre/post-market
+            df = df.between_time(dt_time(4, 0), dt_time(20, 0))
         else:
-            df = df[df.index.date == today].between_time(dt_time(9, 30), dt_time(16, 0))  # Regular hours
+            df = df[df.index.date == today].between_time(dt_time(9, 30), dt_time(16, 0))
         
         # Validate last candle
         if not df.empty and len(df) >= 2:
             last_candle = df.iloc[-1]
             if last_candle['Open'] == last_candle['High'] == last_candle['Low'] == last_candle['Close']:
-                st.warning(f"Last candle for {symbol} has identical OHLC values (${last_candle['Open']:.2f}), possibly incomplete. Trying to fetch more data...")
-                # Try fetching more recent data
+                st.warning(f"Last Yahoo Finance candle for {symbol} has identical OHLC values (${last_candle['Open']:.2f}), possibly incomplete. Trying to fetch more data...")
                 df = stock.history(period='1d', interval=fetch_interval)
                 df = df.tz_convert(local_tz)
                 if extended_hours:
@@ -289,7 +441,7 @@ def get_stock_data(symbol, interval, extended_hours=False):
                 else:
                     df = df[df.index.date == today].between_time(dt_time(9, 30), dt_time(16, 0))
         
-        # Fallback to previous trading day if no valid data
+        # Fallback to previous trading day
         if df.empty or len(df) < 2:
             yesterday = today - timedelta(days=1)
             df = stock.history(period='2d', interval=fetch_interval)
@@ -301,13 +453,13 @@ def get_stock_data(symbol, interval, extended_hours=False):
                 df = df.between_time(dt_time(9, 30), dt_time(16, 0))
             
             if df.empty or len(df) < 2:
-                st.warning(f"No valid data for {symbol} on current or previous trading day with interval {interval}")
+                st.warning(f"No valid Yahoo Finance data for {symbol} on current or previous trading day with interval {interval}")
                 return None
         
-        # Final validation of last candle
+        # Final validation
         last_candle = df.iloc[-1]
         if last_candle['Open'] == last_candle['High'] == last_candle['Low'] == last_candle['Close']:
-            st.warning(f"Last candle for {symbol} still has identical OHLC values (${last_candle['Open']:.2f}) after retry. Data may be stale or from low-liquidity period.")
+            st.warning(f"Last Yahoo Finance candle for {symbol} still has identical OHLC values (${last_candle['Open']:.2f}) after retry. Data may be stale or from low-liquidity period.")
         
         current_price = df['Close'].iloc[-1]
         previous_price = df['Close'].iloc[-2]
@@ -319,7 +471,7 @@ def get_stock_data(symbol, interval, extended_hours=False):
         volume_change_pct = round(((current_volume - previous_volume) / previous_volume) * 100, 3) if previous_volume > 0 else 0
         
         # Debug output
-        st.write(f"Debug: Last candle for {symbol} at {timestamp_local}: Open=${last_candle['Open']:.2f}, High=${last_candle['High']:.2f}, Low=${last_candle['Low']:.2f}, Close=${last_candle['Close']:.2f}, Volume={int(last_candle['Volume']):,}")
+        st.write(f"Debug: Last Yahoo Finance candle for {symbol} at {timestamp_local}: Open=${last_candle['Open']:.2f}, High=${last_candle['High']:.2f}, Low=${last_candle['Low']:.2f}, Close=${last_candle['Close']:.2f}, Volume={int(last_candle['Volume']):,}")
         
         return {
             'data': df,
@@ -333,56 +485,125 @@ def get_stock_data(symbol, interval, extended_hours=False):
             'timestamp': timestamp_local
         }
     except Exception as e:
-        st.error(f"Error fetching data for {symbol}: {str(e)}")
+        st.error(f"Error fetching Yahoo Finance data for {symbol}: {str(e)}")
         return None
 
+# Unified data fetch function
+def get_stock_data(symbol, interval, extended_hours=False):
+    data_source = st.session_state.data_source
+    if data_source == 'Polygon.io':
+        if not st.session_state.polygon_api_key:
+            st.error("Please enter a valid Polygon.io API key in the sidebar")
+            return None
+        return get_polygon_data(symbol, interval, st.session_state.polygon_api_key, extended_hours)
+    else:
+        return get_yahoo_data(symbol, interval, extended_hours)
+
+# Volume trend data
 def get_volume_trend_data(symbol, extended_hours=False):
+    data_source = st.session_state.data_source
     try:
-        stock = yf.Ticker(symbol)
-        df = stock.history(period='2d', interval='1m')
-        if df.empty or len(df) < 2:
-            st.error(f"No intraday data for {symbol}")
-            return None
         local_tz = pytz.timezone('America/New_York')
-        df = df.tz_convert(local_tz)
         today = datetime.now(local_tz).date()
-        
-        # Try current day first
-        df_today = df[df.index.date == today]
-        if extended_hours:
-            df_today = df_today.between_time(dt_time(4, 0), dt_time(20, 0))
-        else:
-            df_today = df_today.between_time(dt_time(9, 30), dt_time(16, 0))
-        
-        if not df_today.empty and len(df_today) >= 2:
-            # Validate last candle
-            last_candle = df_today.iloc[-1]
-            if last_candle['Open'] == last_candle['High'] == last_candle['Low'] == last_candle['Close']:
-                st.warning(f"Last volume trend candle for {symbol} has identical OHLC values (${last_candle['Open']:.2f}). Data may be incomplete.")
-            return df_today
-        
-        # Fallback to previous trading day
         yesterday = today - timedelta(days=1)
-        df_yesterday = df[df.index.date == yesterday]
-        if extended_hours:
-            df_yesterday = df_yesterday.between_time(dt_time(4, 0), dt_time(20, 0))
-        else:
-            df_yesterday = df_yesterday.between_time(dt_time(9, 30), dt_time(16, 0))
         
-        if df_yesterday.empty or len(df_yesterday) < 2:
-            st.warning(f"No data for {symbol} on current or previous trading day")
-            return None
-        return df_yesterday
+        if data_source == 'Polygon.io':
+            if not st.session_state.polygon_api_key:
+                st.error("Please enter a valid Polygon.io API key in the sidebar")
+                return None
+            if not check_polygon_rate_limit():
+                st.error(f"Polygon.io rate limit exceeded (5 calls/minute). Please wait or switch to Yahoo Finance.")
+                return None
+            
+            client = RESTClient(api_key=st.session_state.polygon_api_key)
+            aggs = []
+            for a in client.list_aggs(ticker=symbol, multiplier=1, timespan='minute', 
+                                    from_=yesterday.strftime('%Y-%m-%d'), to=today.strftime('%Y-%m-%d'), limit=50000):
+                aggs.append({
+                    'timestamp': pd.to_datetime(a.timestamp, unit='ms').tz_localize('UTC').tz_convert(local_tz),
+                    'Open': a.open,
+                    'High': a.high,
+                    'Low': a.low,
+                    'Close': a.close,
+                    'Volume': a.volume
+                })
+            st.session_state.polygon_api_calls.append(time.time())
+            
+            df = pd.DataFrame(aggs)
+            df.set_index('timestamp', inplace=True)
+            
+            # Try current day first
+            df_today = df[df.index.date == today]
+            if extended_hours:
+                df_today = df_today.between_time(dt_time(4, 0), dt_time(20, 0))
+            else:
+                df_today = df_today.between_time(dt_time(9, 30), dt_time(16, 0))
+            
+            if not df_today.empty and len(df_today) >= 2:
+                last_candle = df_today.iloc[-1]
+                if last_candle['Open'] == last_candle['High'] == last_candle['Low'] == last_candle['Close']:
+                    st.warning(f"Last Polygon.io volume trend candle for {symbol} has identical OHLC values (${last_candle['Open']:.2f}). Data may be incomplete.")
+                return df_today
+            
+            # Fallback to previous trading day
+            df_yesterday = df[df.index.date == yesterday]
+            if extended_hours:
+                df_yesterday = df_yesterday.between_time(dt_time(4, 0), dt_time(20, 0))
+            else:
+                df_yesterday = df_yesterday.between_time(dt_time(9, 30), dt_time(16, 0))
+            
+            if df_yesterday.empty or len(df_yesterday) < 2:
+                st.warning(f"No Polygon.io data for {symbol} on current or previous trading day")
+                return None
+            return df_yesterday
+        else:
+            stock = yf.Ticker(symbol)
+            df = stock.history(period='2d', interval='1m')
+            if df.empty or len(df) < 2:
+                st.error(f"No intraday Yahoo Finance data for {symbol}")
+                return None
+            df = df.tz_convert(local_tz)
+            
+            # Try current day first
+            df_today = df[df.index.date == today]
+            if extended_hours:
+                df_today = df_today.between_time(dt_time(4, 0), dt_time(20, 0))
+            else:
+                df_today = df_today.between_time(dt_time(9, 30), dt_time(16, 0))
+            
+            if not df_today.empty and len(df_today) >= 2:
+                last_candle = df_today.iloc[-1]
+                if last_candle['Open'] == last_candle['High'] == last_candle['Low'] == last_candle['Close']:
+                    st.warning(f"Last Yahoo Finance volume trend candle for {symbol} has identical OHLC values (${last_candle['Open']:.2f}). Data may be incomplete.")
+                return df_today
+            
+            # Fallback to previous trading day
+            df_yesterday = df[df.index.date == yesterday]
+            if extended_hours:
+                df_yesterday = df_yesterday.between_time(dt_time(4, 0), dt_time(20, 0))
+            else:
+                df_yesterday = df_yesterday.between_time(dt_time(9, 30), dt_time(16, 0))
+            
+            if df_yesterday.empty or len(df_yesterday) < 2:
+                st.warning(f"No Yahoo Finance data for {symbol} on current or previous trading day")
+                return None
+            return df_yesterday
+    except requests.exceptions.HTTPError as e:
+        if data_source == 'Polygon.io' and e.response.status_code == 429:
+            st.error(f"Polygon.io rate limit exceeded (5 calls/minute). Please wait or switch to Yahoo Finance.")
+        else:
+            st.error(f"Error fetching intraday data for {symbol}: {str(e)}")
+        return None
     except Exception as e:
         st.error(f"Error fetching intraday data for {symbol}: {str(e)}")
         return None
 
+# Create candlestick chart
 def create_candlestick_chart(df, symbol, interval):
     if df is not None and not df.empty:
         fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.1, 
                            subplot_titles=('Candlestick', 'Volume', 'RSI'), row_heights=[0.5, 0.3, 0.2])
         
-        # Candlestick
         fig.add_trace(go.Candlestick(x=df.index,
                                     open=df['Open'],
                                     high=df['High'],
@@ -391,18 +612,15 @@ def create_candlestick_chart(df, symbol, interval):
                                     name=symbol),
                      row=1, col=1)
         
-        # SMA
         if len(df) >= 50:
             sma = df['Close'].rolling(window=50).mean()
             fig.add_trace(go.Scatter(x=df.index, y=sma, name='50-Period SMA', line=dict(color='orange', width=2)), row=1, col=1)
         else:
             st.warning(f"Insufficient data for 50-period SMA ({len(df)} candles < 50)")
         
-        # Volume
         colors = ['green' if df['Volume'].iloc[i] >= df['Volume'].iloc[max(0, i-1)] else 'red' for i in range(len(df))]
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume', marker_color=colors), row=2, col=1)
         
-        # RSI
         if len(df) >= 14:
             rsi = calculate_rsi(df)
             fig.add_trace(go.Scatter(x=df.index, y=rsi, name='RSI (14)', line=dict(color='purple', width=2)), row=3, col=1)
@@ -411,12 +629,11 @@ def create_candlestick_chart(df, symbol, interval):
         else:
             st.warning(f"Insufficient data for RSI ({len(df)} candles < 14)")
         
-        # Pattern markers
         patterns = detect_candlestick_patterns(df)
         for pattern in patterns:
             timestamp = pd.to_datetime(pattern['Timestamp'])
             if timestamp in df.index:
-                price = df.loc[timestamp]['High'] * 1.01  # Slightly above high
+                price = df.loc[timestamp]['High'] * 1.01
                 marker_color = 'green' if pattern['Signal'] == 'Bullish' else 'red' if pattern['Signal'] == 'Bearish' else 'gray'
                 fig.add_trace(go.Scatter(
                     x=[timestamp],
@@ -440,6 +657,7 @@ def create_candlestick_chart(df, symbol, interval):
         return fig
     return None
 
+# Create volume trend chart
 def create_volume_trend_chart(df, symbol):
     if df is not None and not df.empty and len(df) >= 2:
         volume_data = df['Volume']
@@ -469,6 +687,7 @@ def create_volume_trend_chart(df, symbol):
         return fig
     return None
 
+# Create portfolio chart
 def create_portfolio_chart(symbols, changes):
     if symbols and changes and all(isinstance(c, (int, float, np.floating)) and not np.isnan(c) for c in changes):
         fig = go.Figure()
@@ -495,15 +714,14 @@ def create_portfolio_chart(symbols, changes):
         st.warning("Invalid or missing data for portfolio chart")
         return None
 
+# Generate recommendations
 def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
     recommendations = []
     
-    # Breakout detection
     breakout_signal, breakout_details = detect_breakout(df_candlestick)
     if breakout_signal:
         recommendations.append(f"{breakout_signal} breakout detected: {breakout_details}")
     
-    # Volume spikes
     if df_volume is not None and not df_volume.empty:
         volume_data = df_volume['Volume']
         volume_changes = volume_data.pct_change() * 100
@@ -513,7 +731,6 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
             spike_times = spikes.index.strftime('%H:%M')
             recommendations.append(f"High volume spikes detected at {', '.join(spike_times)} EDT, indicating strong buying/selling pressure.")
     
-    # Price momentum
     if isinstance(change_pct, (int, float, np.floating)) and not np.isnan(change_pct):
         if change_pct > 2:
             recommendations.append(f"{symbol} (+{change_pct:.3f}%) shows bullish momentum; consider holding or buying on dips.")
@@ -522,12 +739,10 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
         else:
             recommendations.append(f"{symbol} ({change_pct:+.3f}%) is stable; monitor for breakout patterns or candlestick signals.")
     
-    # Candlestick patterns
     patterns = detect_candlestick_patterns(df_candlestick)
-    for pattern in patterns[-3:]:  # Show last 3 patterns
+    for pattern in patterns[-3:]:
         recommendations.append(f"{pattern['Signal']} pattern detected at {pattern['Timestamp']}: {pattern['Pattern']} ({pattern['Details']}, Confidence: {pattern['Confidence']:.1f})")
     
-    # SMA
     if df_candlestick is not None and len(df_candlestick) >= 50:
         sma = df_candlestick['Close'].rolling(window=50).mean().iloc[-1]
         current_price = df_candlestick['Close'].iloc[-1]
@@ -536,7 +751,6 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
         elif current_price < sma:
             recommendations.append("Price is below 50-period SMA; bearish trend indicated.")
     
-    # RSI
     if df_candlestick is not None and len(df_candlestick) >= 14:
         rsi = calculate_rsi(df_candlestick).iloc[-1]
         if rsi > 70:
@@ -547,6 +761,7 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
     recommendations.append("Note: These are not financial advice; consult a professional.")
     return recommendations if recommendations else ["No specific recommendations; monitor market conditions. Note: These are not financial advice; consult a professional."]
 
+# Generate alerts
 def generate_alerts(symbol, change_pct, volume_change_pct, df_candlestick):
     alerts = []
     if isinstance(change_pct, (int, float, np.floating)) and not np.isnan(change_pct) and abs(change_pct) > 5:
@@ -587,32 +802,50 @@ if st.session_state.auto_refresh:
     if refresh_count > 0:
         with st.spinner("🔄 Auto-refreshing stock data..."):
             any_data_updated = False
-            for symbol in list(st.session_state.watchlist.keys()):
-                data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'], extended_hours=True)
-                if data is not None:
-                    st.session_state.watchlist[symbol]['data'] = data['data']
-                    st.session_state.watchlist[symbol]['last_update'] = data['timestamp']
-                    st.session_state.watchlist[symbol]['price'] = data['price']
-                    st.session_state.watchlist[symbol]['volume'] = data['volume']
-                    st.session_state.watchlist[symbol]['open'] = data['open']
-                    st.session_state.watchlist[symbol]['high'] = data['high']
-                    st.session_state.watchlist[symbol]['low'] = data['low']
-                    st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
-                    st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
-                    any_data_updated = True
-            st.session_state.last_refresh_time = time.time()
-            if any_data_updated:
-                st.session_state.refresh_count += 1
+            if st.session_state.data_source == 'Polygon.io' and not check_polygon_rate_limit():
+                st.error("Polygon.io rate limit exceeded (5 calls/minute). Skipping refresh.")
             else:
-                st.warning("Auto-refresh failed: No data updated for any stock")
+                for symbol in list(st.session_state.watchlist.keys()):
+                    data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'], extended_hours=True)
+                    if data is not None:
+                        st.session_state.watchlist[symbol]['data'] = data['data']
+                        st.session_state.watchlist[symbol]['last_update'] = data['timestamp']
+                        st.session_state.watchlist[symbol]['price'] = data['price']
+                        st.session_state.watchlist[symbol]['volume'] = data['volume']
+                        st.session_state.watchlist[symbol]['open'] = data['open']
+                        st.session_state.watchlist[symbol]['high'] = data['high']
+                        st.session_state.watchlist[symbol]['low'] = data['low']
+                        st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
+                        st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
+                        any_data_updated = True
+                st.session_state.last_refresh_time = time.time()
+                if any_data_updated:
+                    st.session_state.refresh_count += 1
+                else:
+                    st.warning("Auto-refresh failed: No data updated for any stock")
 
 # Sidebar for controls
 with st.sidebar:
     st.header("⚙️ Controls")
     
+    st.session_state.data_source = st.radio(
+        "Select Data Source",
+        options=["Yahoo Finance", "Polygon.io"],
+        index=0 if st.session_state.data_source == 'Yahoo Finance' else 1,
+        help="Choose between Yahoo Finance (no API key needed) or Polygon.io (requires API key, free tier limited to 5 calls/minute with 15-minute delayed data)"
+    )
+    
+    if st.session_state.data_source == 'Polygon.io':
+        st.session_state.polygon_api_key = st.text_input(
+            "Polygon.io API Key",
+            value=st.session_state.polygon_api_key,
+            type="password",
+            help="Enter your Polygon.io API key (sign up at polygon.io for a free tier key)"
+        )
+    
     symbol_input = st.text_input(
-        "Enter Stock Symbol (e.g., ASML)",
-        placeholder="e.g., ASML",
+        "Enter Stock Symbol (e.g., AAPL)",
+        placeholder="e.g., AAPL",
         help="Enter a valid stock symbol"
     )
     
@@ -626,7 +859,7 @@ with st.sidebar:
         "Select Chart Time Interval",
         options=list(interval_options.keys()),
         format_func=lambda x: interval_options[x],
-        index=3,  # Default to 5m
+        index=3,
         help="Each candle represents this time period (intraday)"
     )
     
@@ -657,6 +890,8 @@ with st.sidebar:
         if symbol_input:
             symbol = symbol_input.upper().strip()
             if symbol:
+                if st.session_state.data_source == 'Polygon.io' and len(st.session_state.watchlist) >= 5:
+                    st.warning("Polygon.io free tier may hit 5 calls/minute limit with more than 5 stocks. Consider a paid plan or fewer stocks.")
                 data = get_stock_data(symbol, selected_interval, extended_hours)
                 if data is not None:
                     st.session_state.watchlist[symbol] = {
@@ -681,30 +916,37 @@ with st.sidebar:
             st.error("❌ Please enter a stock symbol")
 
     if st.button("🔄 Refresh All", key="refresh_all"):
-        with st.spinner("🔄 Refreshing stock data..."):
-            for symbol in list(st.session_state.watchlist.keys()):
-                data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'], extended_hours)
-                if data is not None:
-                    st.session_state.watchlist[symbol]['data'] = data['data']
-                    st.session_state.watchlist[symbol]['last_update'] = data['timestamp']
-                    st.session_state.watchlist[symbol]['price'] = data['price']
-                    st.session_state.watchlist[symbol]['volume'] = data['volume']
-                    st.session_state.watchlist[symbol]['open'] = data['open']
-                    st.session_state.watchlist[symbol]['high'] = data['high']
-                    st.session_state.watchlist[symbol]['low'] = data['low']
-                    st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
-                    st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
-            st.session_state.last_refresh_time = time.time()
-            st.session_state.refresh_count += 1
-        st.success("✅ All stocks refreshed!")
-        st.rerun()
+        if st.session_state.data_source == 'Polygon.io' and not check_polygon_rate_limit():
+            st.error("Polygon.io rate limit exceeded (5 calls/minute). Please wait or switch to Yahoo Finance.")
+        else:
+            with st.spinner("🔄 Refreshing stock data..."):
+                for symbol in list(st.session_state.watchlist.keys()):
+                    data = get_stock_data(symbol, st.session_state.watchlist[symbol]['interval'], extended_hours)
+                    if data is not None:
+                        st.session_state.watchlist[symbol]['data'] = data['data']
+                        st.session_state.watchlist[symbol]['last_update'] = data['timestamp']
+                        st.session_state.watchlist[symbol]['price'] = data['price']
+                        st.session_state.watchlist[symbol]['volume'] = data['volume']
+                        st.session_state.watchlist[symbol]['open'] = data['open']
+                        st.session_state.watchlist[symbol]['high'] = data['high']
+                        st.session_state.watchlist[symbol]['low'] = data['low']
+                        st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
+                        st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
+                st.session_state.last_refresh_time = time.time()
+                st.session_state.refresh_count += 1
+            st.success("✅ All stocks refreshed!")
+            st.rerun()
 
     if st.button("🗑️ Clear All Stocks", type="secondary"):
         st.session_state.watchlist = {}
+        st.session_state.polygon_api_calls = []
         st.success("✅ All stocks cleared!")
         st.rerun()
     
     st.subheader("🔄 Refresh Status")
+    st.markdown(f"**Data Source:** {st.session_state.data_source}")
+    if st.session_state.data_source == 'Polygon.io':
+        st.markdown(f"**Polygon.io API Calls (last 60s):** {len(st.session_state.polygon_api_calls)}/5")
     st.markdown(f"**Auto-Refresh Enabled:** {'Yes' if st.session_state.auto_refresh else 'No'}")
     st.markdown(f"**Last Refresh:** {datetime.fromtimestamp(st.session_state.last_refresh_time).astimezone(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M:%S %Z') if st.session_state.last_refresh_time else 'N/A'}")
     st.markdown(f"**Refresh Count:** {st.session_state.refresh_count}")
@@ -772,7 +1014,6 @@ with tab1:
                 else:
                     st.warning("No data available for chart")
                 
-                # Candlestick Patterns Table
                 with st.expander(f"Candlestick Patterns for {symbol}"):
                     st.markdown("""
                     **Confidence Score (0–100)**: Measures pattern reliability.  
@@ -792,7 +1033,6 @@ with tab1:
                             patterns_df = patterns_df[patterns_df['Signal'] == filter_option]
                         if not patterns_df.empty:
                             st.dataframe(style_patterns_df(patterns_df), use_container_width=True)
-                            # Add confidence note to CSV
                             csv_data = patterns_df.to_csv(index=False)
                             csv_data = f"Confidence Score (0-100): Measures pattern reliability. Volume Score: 50 if volume > 1.5x 20-candle average, else 0. RSI Score: For Bullish/Neutral, RSI/2 (0-50); for Bearish, (100-RSI)/2 (0-50). Total: Volume + RSI scores. Higher scores indicate stronger signals.\n\n{csv_data}"
                             st.download_button(
@@ -823,7 +1063,6 @@ with tab2:
             else:
                 st.warning(f"Invalid change_pct for {symbol}: {change}")
         
-        # Debug output
         st.write(f"Valid Symbols: {valid_symbols}")
         st.write(f"Valid Changes: {changes}")
         
@@ -862,4 +1101,4 @@ with tab3:
 
 # Footer
 st.markdown("---")
-st.markdown("🔍 **Data provided by Yahoo Finance** | 📊 **Real-Time Stock Monitoring Dashboard**")
+st.markdown("🔍 **Data provided by Yahoo Finance or Polygon.io** | 📊 **Real-Time Stock Monitoring Dashboard**")
