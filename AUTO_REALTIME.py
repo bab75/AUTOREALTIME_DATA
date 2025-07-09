@@ -33,6 +33,96 @@ def calculate_rsi(data, periods=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
+# Detect breakout patterns
+def detect_breakout(df, lookback=20):
+    if len(df) < lookback:
+        return None, None
+    recent_data = df[-lookback:]
+    resistance = recent_data['High'].max()
+    support = recent_data['Low'].min()
+    avg_volume = recent_data['Volume'].mean()
+    current_price = df['Close'].iloc[-1]
+    current_volume = df['Volume'].iloc[-1]
+    
+    if current_price > resistance and current_volume > 1.5 * avg_volume:
+        return 'Bullish', f"Price broke above resistance (${resistance:.2f}) with high volume"
+    elif current_price < support and current_volume > 1.5 * avg_volume:
+        return 'Bearish', f"Price broke below support (${support:.2f}) with high volume"
+    return None, None
+
+# Detect candlestick patterns
+def detect_candlestick_patterns(df):
+    patterns = []
+    if len(df) < 3:
+        return patterns
+    
+    for i in range(2, len(df)):
+        curr = df.iloc[i]
+        prev = df.iloc[i-1]
+        prev2 = df.iloc[i-2]
+        open_c, close_c, high_c, low_c = curr['Open'], curr['Close'], curr['High'], curr['Low']
+        open_p, close_p, high_p, low_p = prev['Open'], prev['Close'], prev['High'], prev['Low']
+        open_p2, close_p2 = prev2['Open'], prev2['Close']
+        
+        # Bullish Engulfing
+        if close_p < open_p and close_c > open_c and close_c > open_p and open_c < close_p:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Bullish Engulfing',
+                'Signal': 'Bullish',
+                'Details': 'Price may rise after engulfing prior bearish candle'
+            })
+        # Bearish Engulfing
+        elif close_p > open_p and close_c < open_c and close_c < open_p and open_c > close_p:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Bearish Engulfing',
+                'Signal': 'Bearish',
+                'Details': 'Price may fall after engulfing prior bullish candle'
+            })
+        # Doji
+        elif abs(close_c - open_c) <= (high_c - low_c) * 0.1:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Doji',
+                'Signal': 'Neutral',
+                'Details': 'Market indecision; watch for breakout'
+            })
+        # Hammer
+        elif (high_c - low_c) > 2 * abs(close_c - open_c) and (close_c - low_c) >= 0.7 * (high_c - low_c) and (open_c - low_c) >= 0.7 * (high_c - low_c):
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Hammer',
+                'Signal': 'Bullish',
+                'Details': 'Potential reversal upward after downtrend'
+            })
+        # Shooting Star
+        elif (high_c - low_c) > 2 * abs(close_c - open_c) and (high_c - close_c) >= 0.7 * (high_c - low_c) and (high_c - open_c) >= 0.7 * (high_c - low_c):
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Shooting Star',
+                'Signal': 'Bearish',
+                'Details': 'Potential reversal downward after uptrend'
+            })
+        # Morning Star (3-candle pattern)
+        elif close_p2 > open_p2 and close_p < open_p and abs(close_p - open_p) < (high_p - low_p) * 0.3 and close_c > open_c and close_c > (open_p2 + close_p2) / 2:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Morning Star',
+                'Signal': 'Bullish',
+                'Details': 'Strong reversal upward after downtrend'
+            })
+        # Evening Star (3-candle pattern)
+        elif close_p2 < open_p2 and close_p > open_p and abs(close_p - open_p) < (high_p - low_p) * 0.3 and close_c < open_c and close_c < (open_p2 + close_p2) / 2:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Evening Star',
+                'Signal': 'Bearish',
+                'Details': 'Strong reversal downward after uptrend'
+            })
+    
+    return patterns
+
 # Custom functions
 def get_stock_data(symbol, interval):
     try:
@@ -213,6 +303,12 @@ def create_portfolio_chart(symbols, changes):
 def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
     recommendations = []
     
+    # Breakout detection
+    breakout_signal, breakout_details = detect_breakout(df_candlestick)
+    if breakout_signal:
+        recommendations.append(f"{breakout_signal} breakout detected: {breakout_details}")
+    
+    # Volume spikes
     if df_volume is not None and not df_volume.empty:
         volume_data = df_volume['Volume']
         volume_changes = volume_data.pct_change() * 100
@@ -222,27 +318,16 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
             spike_times = spikes.index.strftime('%H:%M')
             recommendations.append(f"High volume spikes detected at {', '.join(spike_times)} EDT, indicating strong buying/selling pressure.")
     
+    # Price momentum
     if isinstance(change_pct, (int, float, np.floating)) and not np.isnan(change_pct):
         if change_pct > 2:
             recommendations.append(f"{symbol} (+{change_pct:.3f}%) shows bullish momentum; consider holding or buying on dips.")
         elif change_pct < -2:
             recommendations.append(f"{symbol} ({change_pct:+.3f}%) shows bearish momentum; consider selling or waiting for a reversal.")
         else:
-            recommendations.append(f"{symbol} ({change_pct:+.3f}%) is stable; monitor for breakout patterns.")
+            recommendations.append(f"{symbol} ({change_pct:+.3f}%) is stable; monitor for breakout patterns or candlestick signals.")
     
-    if df_candlestick is not None and len(df_candlestick) >= 2:
-        last_candle = df_candlestick.iloc[-1]
-        prev_candle = df_candlestick.iloc[-2]
-        open_last, close_last, high_last, low_last = last_candle['Open'], last_candle['Close'], last_candle['High'], last_candle['Low']
-        open_prev, close_prev, high_prev, low_prev = prev_candle['Open'], prev_candle['Close'], prev_candle['High'], prev_candle['Low']
-        
-        if close_prev < open_prev and close_last > open_last and close_last > open_prev and open_last < close_prev:
-            recommendations.append("Bullish engulfing pattern detected; potential upward movement expected.")
-        elif close_prev > open_prev and close_last < open_last and close_last < open_prev and open_last > close_prev:
-            recommendations.append("Bearish engulfing pattern detected; potential downward movement expected.")
-        elif abs(close_last - open_last) <= (high_last - low_last) * 0.1:
-            recommendations.append("Doji pattern detected; market indecision, watch for breakout.")
-    
+    # SMA
     if df_candlestick is not None and len(df_candlestick) >= 50:
         sma = df_candlestick['Close'].rolling(window=50).mean().iloc[-1]
         current_price = df_candlestick['Close'].iloc[-1]
@@ -251,6 +336,7 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
         elif current_price < sma:
             recommendations.append("Price is below 50-period SMA; bearish trend indicated.")
     
+    # RSI
     if df_candlestick is not None and len(df_candlestick) >= 14:
         rsi = calculate_rsi(df_candlestick).iloc[-1]
         if rsi > 70:
@@ -261,12 +347,15 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
     recommendations.append("Note: These are not financial advice; consult a professional.")
     return recommendations if recommendations else ["No specific recommendations; monitor market conditions. Note: These are not financial advice; consult a professional."]
 
-def generate_alerts(symbol, change_pct, volume_change_pct):
+def generate_alerts(symbol, change_pct, volume_change_pct, df_candlestick):
     alerts = []
     if isinstance(change_pct, (int, float, np.floating)) and not np.isnan(change_pct) and abs(change_pct) > 5:
         alerts.append(f"Significant price movement in {symbol}: {change_pct:+.3f}%")
     if isinstance(volume_change_pct, (int, float, np.floating)) and not np.isnan(volume_change_pct) and volume_change_pct > 100:
         alerts.append(f"Significant volume spike in {symbol}: +{volume_change_pct:.3f}%")
+    breakout_signal, breakout_details = detect_breakout(df_candlestick)
+    if breakout_signal:
+        alerts.append(f"{breakout_signal} breakout detected for {symbol}: {breakout_details}")
     return alerts
 
 # Configure page
@@ -290,7 +379,7 @@ threading.Thread(target=display_clock, daemon=True).start()
 
 # Title and description
 st.title("📈 Real-Time Stock Monitoring Dashboard")
-st.markdown("Track multiple stocks with interactive candlestick charts and real-time updates")
+st.markdown("Track multiple stocks with interactive candlestick charts, breakout patterns, and candlestick signals")
 
 # Auto-refresh logic
 if st.session_state.auto_refresh:
@@ -452,7 +541,7 @@ with tab1:
             with st.container():
                 st.subheader(f"📊 {symbol}")
                 
-                alerts = generate_alerts(symbol, stock_info['change_pct'], stock_info['volume_change_pct'])
+                alerts = generate_alerts(symbol, stock_info['change_pct'], stock_info['volume_change_pct'], stock_info['data'])
                 for alert in alerts:
                     st.warning(f"⚠️ {alert}")
                 
@@ -482,18 +571,21 @@ with tab1:
                 else:
                     st.warning("No data available for chart")
                 
+                # Candlestick Patterns Table
+                with st.expander(f"Candlestick Patterns for {symbol}"):
+                    patterns = detect_candlestick_patterns(stock_info['data'])
+                    if patterns:
+                        patterns_df = pd.DataFrame(patterns)
+                        st.table(patterns_df)
+                    else:
+                        st.info("No candlestick patterns detected for this stock")
+                
                 st.divider()
 
 with tab2:
     st.header("Portfolio Performance Overview")
-    st.markdown("Percentage change for stocks in your watchlist")
+    st.markdown("Percentage change for all stocks in your watchlist")
     if st.session_state.watchlist:
-        filter_option = st.selectbox(
-            "Filter Stocks",
-            options=["All Stocks", "Top Gainers", "Top Losers"],
-            help="All Stocks: All watchlist stocks; Top Gainers: Top 3 by % change; Top Losers: Bottom 3 by % change"
-        )
-        
         symbols = list(st.session_state.watchlist.keys())
         changes = []
         valid_symbols = []
@@ -512,20 +604,7 @@ with tab2:
         if not valid_symbols:
             st.warning("No valid stocks available for portfolio performance chart")
         else:
-            if filter_option == "Top Gainers":
-                sorted_pairs = sorted(zip(valid_symbols, changes), key=lambda x: x[1], reverse=True)[:3]
-                symbols, changes = zip(*sorted_pairs) if sorted_pairs else ([], [])
-                if not sorted_pairs:
-                    st.warning("No qualifying stocks for Top Gainers")
-            elif filter_option == "Top Losers":
-                sorted_pairs = sorted(zip(valid_symbols, changes), key=lambda x: x[1])[:3]
-                symbols, changes = zip(*sorted_pairs) if sorted_pairs else ([], [])
-                if not sorted_pairs:
-                    st.warning("No qualifying stocks for Top Losers")
-            else:
-                symbols, changes = valid_symbols, changes
-            
-            fig = create_portfolio_chart(symbols, changes)
+            fig = create_portfolio_chart(valid_symbols, changes)
             if fig:
                 st.plotly_chart(fig, use_container_width=True)
             else:
