@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timedelta
 import pytz
 import threading
 from streamlit_autorefresh import st_autorefresh
@@ -64,14 +64,14 @@ def detect_candlestick_patterns(df):
         open_p, close_p, high_p, low_p = prev['Open'], prev['Close'], prev['High'], prev['Low']
         open_p2, close_p2, high_p2, low_p2 = prev2['Open'], prev2['Close'], prev2['High'], prev2['Low']
         
-        # Calculate confidence (volume and RSI-based)
+        # Calculate confidence
         avg_volume = df['Volume'].iloc[max(0, i-20):i].mean()
         volume_score = 50 if df['Volume'].iloc[i] > 1.5 * avg_volume else 0
         rsi = calculate_rsi(df.iloc[:i+1]).iloc[-1] if len(df.iloc[:i+1]) >= 14 else 50
-        rsi_score = 50 * (rsi / 100) if rsi <= 50 else 50 * ((100 - rsi) / 100)
         
         # Bullish Engulfing
         if close_p < open_p and close_c > open_c and close_c > open_p and open_c < close_p:
+            rsi_score = 50 * (rsi / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Bullish Engulfing',
@@ -81,24 +81,27 @@ def detect_candlestick_patterns(df):
             })
         # Bearish Engulfing
         elif close_p > open_p and close_c < open_c and close_c < open_p and open_c > close_p:
+            rsi_score = 50 * ((100 - rsi) / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Bearish Engulfing',
                 'Signal': 'Bearish',
                 'Details': 'Price may fall after engulfing prior bullish candle',
-                'Confidence': round(volume_score + (50 - rsi_score), 1)
+                'Confidence': round(volume_score + rsi_score, 1)
             })
         # Doji
         elif abs(close_c - open_c) <= (high_c - low_c) * 0.1:
+            rsi_score = 50 * (rsi / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Doji',
                 'Signal': 'Neutral',
                 'Details': 'Market indecision; watch for breakout',
-                'Confidence': round(volume_score, 1)
+                'Confidence': round(volume_score + rsi_score, 1)
             })
         # Hammer
         elif (high_c - low_c) > 2 * abs(close_c - open_c) and (close_c - low_c) >= 0.7 * (high_c - low_c) and (open_c - low_c) >= 0.7 * (high_c - low_c):
+            rsi_score = 50 * (rsi / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Hammer',
@@ -108,15 +111,17 @@ def detect_candlestick_patterns(df):
             })
         # Shooting Star
         elif (high_c - low_c) > 2 * abs(close_c - open_c) and (high_c - close_c) >= 0.7 * (high_c - low_c) and (high_c - open_c) >= 0.7 * (high_c - low_c):
+            rsi_score = 50 * ((100 - rsi) / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Shooting Star',
                 'Signal': 'Bearish',
                 'Details': 'Potential reversal downward after uptrend',
-                'Confidence': round(volume_score + (50 - rsi_score), 1)
+                'Confidence': round(volume_score + rsi_score, 1)
             })
         # Morning Star
         elif close_p2 > open_p2 and close_p < open_p and abs(close_p - open_p) < (high_p - low_p) * 0.3 and close_c > open_c and close_c > (open_p2 + close_p2) / 2:
+            rsi_score = 50 * (rsi / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Morning Star',
@@ -126,15 +131,17 @@ def detect_candlestick_patterns(df):
             })
         # Evening Star
         elif close_p2 < open_p2 and close_p > open_p and abs(close_p - open_p) < (high_p - low_p) * 0.3 and close_c < open_c and close_c < (open_p2 + close_p2) / 2:
+            rsi_score = 50 * ((100 - rsi) / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Evening Star',
                 'Signal': 'Bearish',
                 'Details': 'Strong reversal downward after uptrend',
-                'Confidence': round(volume_score + (50 - rsi_score), 1)
+                'Confidence': round(volume_score + rsi_score, 1)
             })
         # Bullish Harami
         elif close_p < open_p and close_c > open_c and open_c >= close_p and close_c <= open_p:
+            rsi_score = 50 * (rsi / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Bullish Harami',
@@ -144,15 +151,17 @@ def detect_candlestick_patterns(df):
             })
         # Bearish Harami
         elif close_p > open_p and close_c < open_c and open_c <= close_p and close_c >= open_p:
+            rsi_score = 50 * ((100 - rsi) / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Bearish Harami',
                 'Signal': 'Bearish',
                 'Details': 'Potential reversal downward; small bearish candle inside bullish candle',
-                'Confidence': round(volume_score + (50 - rsi_score), 1)
+                'Confidence': round(volume_score + rsi_score, 1)
             })
         # Bullish Kicker
         elif close_p < open_p and close_c > open_c and open_c > high_p:
+            rsi_score = 50 * (rsi / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Bullish Kicker',
@@ -162,17 +171,19 @@ def detect_candlestick_patterns(df):
             })
         # Bearish Kicker
         elif close_p > open_p and close_c < open_c and open_c < low_p:
+            rsi_score = 50 * ((100 - rsi) / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Bearish Kicker',
                 'Signal': 'Bearish',
                 'Details': 'Strong bearish reversal with gap down after uptrend',
-                'Confidence': round(volume_score + (50 - rsi_score), 1)
+                'Confidence': round(volume_score + rsi_score, 1)
             })
         # Three White Soldiers
         if i >= 3 and close_c > open_c and close_p > open_p and close_p2 > open_p2 and \
            (close_c - open_c) > (high_c - low_c) * 0.5 and (close_p - open_p) > (high_p - low_p) * 0.5 and \
            (close_p2 - open_p2) > (high_p2 - low_p2) * 0.5:
+            rsi_score = 50 * (rsi / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Three White Soldiers',
@@ -184,15 +195,17 @@ def detect_candlestick_patterns(df):
         elif i >= 3 and close_c < open_c and close_p < open_p and close_p2 < open_p2 and \
              (open_c - close_c) > (high_c - low_c) * 0.5 and (open_p - close_p) > (high_p - low_p) * 0.5 and \
              (open_p2 - close_p2) > (high_p2 - low_p2) * 0.5:
+            rsi_score = 50 * ((100 - rsi) / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Three Black Crows',
                 'Signal': 'Bearish',
                 'Details': 'Strong downward momentum with three consecutive bearish candles',
-                'Confidence': round(volume_score + (50 - rsi_score), 1)
+                'Confidence': round(volume_score + rsi_score, 1)
             })
         # Piercing Line
         elif close_p < open_p and close_c > open_c and close_c > (open_p + close_p) / 2 and open_c < close_p:
+            rsi_score = 50 * (rsi / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Piercing Line',
@@ -202,12 +215,13 @@ def detect_candlestick_patterns(df):
             })
         # Dark Cloud Cover
         elif close_p > open_p and close_c < open_c and close_c < (open_p + close_p) / 2 and open_c > close_p:
+            rsi_score = 50 * ((100 - rsi) / 100)
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Dark Cloud Cover',
                 'Signal': 'Bearish',
                 'Details': 'Bearish reversal; bearish candle covers bullish candle midpoint',
-                'Confidence': round(volume_score + (50 - rsi_score), 1)
+                'Confidence': round(volume_score + rsi_score, 1)
             })
     
     return patterns
@@ -253,18 +267,29 @@ def get_stock_data(symbol, interval, extended_hours=False):
             df = df.resample(f'{hours}H').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 
                                              'Close': 'last', 'Volume': 'sum'}).dropna()
         
-        # Filter for current trading day
+        # Filter for current trading day or extended hours
         local_tz = pytz.timezone('America/New_York')
         df = df.tz_convert(local_tz)
         today = datetime.now(local_tz).date()
         if extended_hours:
-            df = df.between_time(dt_time(4, 0), dt_time(20, 0))  # Pre-market and post-market
+            df = df.between_time(dt_time(4, 0), dt_time(20, 0))  # Pre/post-market
         else:
             df = df[df.index.date == today]
         
         if df.empty or len(df) < 2:
-            st.warning(f"No data for {symbol} on current trading day with interval {interval}")
-            return None
+            # Fallback to previous trading day
+            yesterday = today - timedelta(days=1)
+            df = stock.history(period='2d', interval=fetch_interval)
+            df = df.tz_convert(local_tz)
+            df = df[df.index.date == yesterday]
+            if extended_hours:
+                df = df.between_time(dt_time(4, 0), dt_time(20, 0))
+            else:
+                df = df.between_time(dt_time(9, 30), dt_time(16, 0))
+            
+            if df.empty or len(df) < 2:
+                st.warning(f"No data for {symbol} on current or previous trading day with interval {interval}")
+                return None
         
         current_price = df['Close'].iloc[-1]
         previous_price = df['Close'].iloc[-2]
@@ -289,21 +314,39 @@ def get_stock_data(symbol, interval, extended_hours=False):
         st.error(f"Error fetching data for {symbol}: {str(e)}")
         return None
 
-def get_volume_trend_data(symbol):
+def get_volume_trend_data(symbol, extended_hours=False):
     try:
         stock = yf.Ticker(symbol)
-        df = stock.history(period='1d', interval='1m')
+        df = stock.history(period='2d', interval='1m')
         if df.empty or len(df) < 2:
             st.error(f"No intraday data for {symbol}")
             return None
         local_tz = pytz.timezone('America/New_York')
         df = df.tz_convert(local_tz)
         today = datetime.now(local_tz).date()
-        df = df[df.index.date == today]  # Show last trading day's data
-        if df.empty:
-            st.warning(f"No data for {symbol} on current trading day")
+        
+        # Try current day first
+        df_today = df[df.index.date == today]
+        if extended_hours:
+            df_today = df_today.between_time(dt_time(4, 0), dt_time(20, 0))
+        else:
+            df_today = df_today.between_time(dt_time(9, 30), dt_time(16, 0))
+        
+        if not df_today.empty and len(df_today) >= 2:
+            return df_today
+        
+        # Fallback to previous trading day
+        yesterday = today - timedelta(days=1)
+        df_yesterday = df[df.index.date == yesterday]
+        if extended_hours:
+            df_yesterday = df_yesterday.between_time(dt_time(4, 0), dt_time(20, 0))
+        else:
+            df_yesterday = df_yesterday.between_time(dt_time(9, 30), dt_time(16, 0))
+        
+        if df_yesterday.empty or len(df_yesterday) < 2:
+            st.warning(f"No data for {symbol} on current or previous trading day")
             return None
-        return df
+        return df_yesterday
     except Exception as e:
         st.error(f"Error fetching intraday data for {symbol}: {str(e)}")
         return None
@@ -375,6 +418,9 @@ def create_volume_trend_chart(df, symbol):
     if df is not None and not df.empty and len(df) >= 2:
         volume_data = df['Volume']
         labels = volume_data.index.strftime('%H:%M')
+        today = datetime.now(pytz.timezone('America/New_York')).date()
+        chart_date = df.index.date[0]
+        date_str = "Last Trading Day" if chart_date != today else "Current Trading Day"
         
         fig = go.Figure()
         fig.add_trace(go.Scatter(
@@ -388,7 +434,7 @@ def create_volume_trend_chart(df, symbol):
         ))
         
         fig.update_layout(
-            title=f"Volume Trend for {symbol} (Last Trading Day)",
+            title=f"Volume Trend for {symbol} ({date_str})",
             xaxis_title="Time (EDT)",
             yaxis_title="Volume",
             template="plotly_white",
@@ -707,6 +753,12 @@ with tab1:
                 
                 # Candlestick Patterns Table
                 with st.expander(f"Candlestick Patterns for {symbol}"):
+                    st.markdown("""
+                    **Confidence Score (0–100)**: Measures pattern reliability.  
+                    - **Volume Score**: 50 if volume > 1.5x 20-candle average, else 0.  
+                    - **RSI Score**: For Bullish/Neutral, RSI/2 (0–50); for Bearish, (100–RSI)/2 (0–50).  
+                    - **Total**: Volume + RSI scores. Higher scores indicate stronger signals.
+                    """)
                     patterns = detect_candlestick_patterns(stock_info['data'])
                     if patterns:
                         patterns_df = pd.DataFrame(patterns)
@@ -719,9 +771,12 @@ with tab1:
                             patterns_df = patterns_df[patterns_df['Signal'] == filter_option]
                         if not patterns_df.empty:
                             st.dataframe(style_patterns_df(patterns_df), use_container_width=True)
+                            # Add confidence note to CSV
+                            csv_data = patterns_df.to_csv(index=False)
+                            csv_data = f"Confidence Score (0-100): Measures pattern reliability. Volume Score: 50 if volume > 1.5x 20-candle average, else 0. RSI Score: For Bullish/Neutral, RSI/2 (0-50); for Bearish, (100-RSI)/2 (0-50). Total: Volume + RSI scores. Higher scores indicate stronger signals.\n\n{csv_data}"
                             st.download_button(
                                 label="📥 Download Candlestick Patterns",
-                                data=patterns_df.to_csv(index=False),
+                                data=csv_data,
                                 file_name=f"{symbol}_candlestick_patterns.csv",
                                 mime="text/csv"
                             )
@@ -768,7 +823,7 @@ with tab3:
         st.subheader(f"📈 Volume Trend for {selected_volume_stock}")
         st.markdown("Volume from last trading day")
         
-        df_volume = get_volume_trend_data(selected_volume_stock)
+        df_volume = get_volume_trend_data(selected_volume_stock, extended_hours)
         fig = create_volume_trend_chart(df_volume, selected_volume_stock)
         if fig:
             st.plotly_chart(fig, use_container_width=True)
