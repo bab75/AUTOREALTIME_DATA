@@ -605,7 +605,8 @@ with st.sidebar:
     )
     
     extended_hours = st.toggle(
-        "Include Extended Hours (Pre/Post-Market)",
+        #"Include Extended Hours (Pre/Post-Market)",
+        "EH Hours(Pre/Post)",
         value=False,
         help="Include pre-market (4:00 AM–9:30 AM EDT) and post-market (4:00 PM–8:00 PM EDT) data"
     )
@@ -798,8 +799,8 @@ with tab2:
                 st.warning(f"Invalid change_pct for {symbol}: {change}")
         
         # Debug output
-        st.write(f"Valid Symbols: {valid_symbols}")
-        st.write(f"Valid Changes: {changes}")
+        #st.write(f"Valid Symbols: {valid_symbols}")
+        #st.write(f"Valid Changes: {changes}")
         
         if not valid_symbols:
             st.warning("No valid stocks available for portfolio performance chart")
