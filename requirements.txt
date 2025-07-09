@@ -8,4 +8,4 @@ numpy>=1.26.0
 streamlit_autorefresh>=0.0.1
 polygon-api-client>=1.12.4
 requests>=2.31.0
-MetaTrader5
+metatrader5==5.0.5120
