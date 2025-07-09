@@ -15,7 +15,7 @@ if 'watchlist' not in st.session_state:
     st.session_state.watchlist = {}
 if 'auto_refresh' not in st.session_state:
     st.session_state.auto_refresh = False
-if 'refresh_interval' not in st.session_state:
+if 'refresh制限: if 'refresh_interval' not in st.session_state:
     st.session_state.refresh_interval = 60  # Default to 60 seconds
 if 'last_refresh_time' not in st.session_state:
     st.session_state.last_refresh_time = time.time()
@@ -62,7 +62,7 @@ def detect_candlestick_patterns(df):
         prev2 = df.iloc[i-2]
         open_c, close_c, high_c, low_c = curr['Open'], curr['Close'], curr['High'], curr['Low']
         open_p, close_p, high_p, low_p = prev['Open'], prev['Close'], prev['High'], prev['Low']
-        open_p2, close_p2 = prev2['Open'], prev2['Close']
+        open_p2, close_p2, high_p2, low_p2 = prev2['Open'], prev2['Close'], prev2['High'], prev2['Low']
         
         # Calculate confidence (volume and RSI-based)
         avg_volume = df['Volume'].iloc[max(0, i-20):i].mean()
@@ -189,6 +189,24 @@ def detect_candlestick_patterns(df):
                 'Pattern': 'Three Black Crows',
                 'Signal': 'Bearish',
                 'Details': 'Strong downward momentum with three consecutive bearish candles',
+                'Confidence': round(volume_score + (50 - rsi_score), 1)
+            })
+        # Piercing Line
+        elif close_p < open_p and close_c > open_c and close_c > (open_p + close_p) / 2 and open_c < close_p:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Piercing Line',
+                'Signal': 'Bullish',
+                'Details': 'Bullish reversal; bullish candle pierces bearish candle midpoint',
+                'Confidence': round(volume_score + rsi_score, 1)
+            })
+        # Dark Cloud Cover
+        elif close_p > open_p and close_c < open_c and close_c < (open_p + close_p) / 2 and open_c > close_p:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Dark Cloud Cover',
+                'Signal': 'Bearish',
+                'Details': 'Bearish reversal; bearish candle covers bullish candle midpoint',
                 'Confidence': round(volume_score + (50 - rsi_score), 1)
             })
     
@@ -684,13 +702,23 @@ with tab1:
                     patterns = detect_candlestick_patterns(stock_info['data'])
                     if patterns:
                         patterns_df = pd.DataFrame(patterns)
-                        st.dataframe(style_patterns_df(patterns_df), use_container_width=True)
-                        st.download_button(
-                            label="📥 Download Candlestick Patterns",
-                            data=patterns_df.to_csv(index=False),
-                            file_name=f"{symbol}_candlestick_patterns.csv",
-                            mime="text/csv"
+                        filter_option = st.selectbox(
+                            "Filter Patterns",
+                            options=["All", "Bullish", "Bearish", "Neutral"],
+                            key=f"filter_{symbol}"
                         )
+                        if filter_option != "All":
+                            patterns_df = patterns_df[patterns_df['Signal'] == filter_option]
+                        if not patterns_df.empty:
+                            st.dataframe(style_patterns_df(patterns_df), use_container_width=True)
+                            st.download_button(
+                                label="📥 Download Candlestick Patterns",
+                                data=patterns_df.to_csv(index=False),
+                                file_name=f"{symbol}_candlestick_patterns.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.info(f"No {filter_option.lower()} patterns detected")
                     else:
                         st.info("No candlestick patterns detected for this stock")
                 
