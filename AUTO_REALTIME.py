@@ -8,6 +8,7 @@ from datetime import datetime, time as dt_time
 import pytz
 import threading
 from streamlit_autorefresh import st_autorefresh
+import pandas_ta as ta
 
 # Initialize session state
 if 'watchlist' not in st.session_state:
@@ -24,10 +25,13 @@ if 'refresh_count' not in st.session_state:
     st.session_state.refresh_count = 0
 
 # Custom functions
-def get_stock_data(symbol, interval, period='1d'):
+def get_stock_data(symbol, interval, period=None):
     try:
-        # Adjust period for 1d interval to ensure enough data for candlestick charts
-        period = '1mo' if interval == '1d' else period
+        # Set period based on interval
+        if interval == '1m':
+            period = '7d'
+        else:
+            period = '60d'  # Covers 3m to 4h
         stock = yf.Ticker(symbol)
         df = stock.history(period=period, interval=interval)
         if df.empty or len(df) < 2:
@@ -81,8 +85,9 @@ def get_volume_trend_data(symbol):
 
 def create_candlestick_chart(df, symbol, interval):
     if df is not None and not df.empty:
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, subplot_titles=('Candlestick', 'Volume'), row_heights=[0.7, 0.3])
+        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.1, subplot_titles=('Candlestick', 'Volume', 'RSI'), row_heights=[0.5, 0.3, 0.2])
         
+        # Candlestick
         fig.add_trace(go.Candlestick(x=df.index,
                                     open=df['Open'],
                                     high=df['High'],
@@ -91,18 +96,27 @@ def create_candlestick_chart(df, symbol, interval):
                                     name=symbol),
                      row=1, col=1)
         
-        # Add 50-period SMA
+        # 50-period SMA
         if len(df) >= 50:
             sma = df['Close'].rolling(window=50).mean()
             fig.add_trace(go.Scatter(x=df.index, y=sma, name='50-Period SMA', line=dict(color='orange', width=2)), row=1, col=1)
         
+        # Volume
         colors = ['green' if df['Volume'].iloc[i] >= df['Volume'].iloc[max(0, i-1)] else 'red' for i in range(len(df))]
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume', marker_color=colors), row=2, col=1)
+        
+        # RSI
+        if len(df) >= 14:
+            rsi = ta.rsi(df['Close'], length=14)
+            fig.add_trace(go.Scatter(x=df.index, y=rsi, name='RSI (14)', line=dict(color='purple', width=2)), row=3, col=1)
+            fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
+            fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
         
         fig.update_layout(
             title=f"{symbol} Candlestick Chart ({interval})",
             yaxis_title="Price",
             yaxis2_title="Volume",
+            yaxis3_title="RSI",
             xaxis_title="Time",
             xaxis_rangeslider_visible=False,
             template="plotly_white"
@@ -145,7 +159,7 @@ def create_portfolio_chart(symbols, changes):
             marker_color=['#4CAF50' if c >= 0 else '#F44336' for c in changes],
             marker_line_color=['#388E3C' if c >= 0 else '#D32F2F' for c in changes],
             marker_line_width=1,
-            text=[f"{c:.3f}%" for c in changes],  # Show 3 decimals with % in hover
+            text=[f"{c:.3f}%" for c in changes],
             textposition='auto'
         ))
         
@@ -167,7 +181,7 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
     if df_volume is not None and not df_volume.empty:
         volume_data = df_volume['Volume']
         volume_changes = volume_data.pct_change() * 100
-        spike_threshold = 50  # 50% increase
+        spike_threshold = 50
         spikes = volume_changes[volume_changes > spike_threshold]
         if not spikes.empty:
             spike_times = spikes.index.strftime('%H:%M')
@@ -189,13 +203,10 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
         open_last, close_last, high_last, low_last = last_candle['Open'], last_candle['Close'], last_candle['High'], last_candle['Low']
         open_prev, close_prev, high_prev, low_prev = prev_candle['Open'], prev_candle['Close'], prev_candle['High'], prev_candle['Low']
         
-        # Bullish Engulfing
         if close_prev < open_prev and close_last > open_last and close_last > open_prev and open_last < close_prev:
             recommendations.append("Bullish engulfing pattern detected; potential upward movement expected.")
-        # Bearish Engulfing
         elif close_prev > open_prev and close_last < open_last and close_last < open_prev and open_last > close_prev:
             recommendations.append("Bearish engulfing pattern detected; potential downward movement expected.")
-        # Doji (indecision)
         elif abs(close_last - open_last) <= (high_last - low_last) * 0.1:
             recommendations.append("Doji pattern detected; market indecision, watch for breakout.")
     
@@ -207,6 +218,14 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
             recommendations.append("Price is above 50-period SMA; bullish trend indicated.")
         elif current_price < sma:
             recommendations.append("Price is below 50-period SMA; bearish trend indicated.")
+    
+    # RSI Analysis
+    if df_candlestick is not None and len(df_candlestick) >= 14:
+        rsi = ta.rsi(df_candlestick['Close'], length=14).iloc[-1]
+        if rsi > 70:
+            recommendations.append("RSI above 70; stock may be overbought, consider taking profits.")
+        elif rsi < 30:
+            recommendations.append("RSI below 30; stock may be oversold, potential buying opportunity.")
     
     return recommendations if recommendations else ["No specific recommendations; monitor market conditions."]
 
@@ -234,11 +253,10 @@ threading.Thread(target=display_clock, daemon=True).start()
 st.title("📈 Real-Time Stock Monitoring Dashboard")
 st.markdown("Track multiple stocks with interactive candlestick charts and real-time updates")
 
-# Auto-refresh logic (before sidebar to ensure timestamp updates)
+# Auto-refresh logic
 if st.session_state.auto_refresh:
-    # Convert interval to milliseconds (60 seconds = 60000 ms)
     refresh_count = st_autorefresh(interval=st.session_state.refresh_interval * 1000, key="stockrefresh")
-    if refresh_count > 0:  # Skip first run to avoid immediate refresh
+    if refresh_count > 0:
         with st.spinner("🔄 Auto-refreshing stock data..."):
             any_data_updated = False
             for symbol in list(st.session_state.watchlist.keys()):
@@ -254,7 +272,7 @@ if st.session_state.auto_refresh:
                     st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
                     st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
                     any_data_updated = True
-            st.session_state.last_refresh_time = time.time()  # Update timestamp every refresh
+            st.session_state.last_refresh_time = time.time()
             if any_data_updated:
                 st.session_state.refresh_count += 1
             else:
@@ -271,10 +289,9 @@ with st.sidebar:
     )
     
     interval_options = {
-        "1m": "1 Minute", "2m": "2 Minutes", "5m": "5 Minutes",
-        "15m": "15 Minutes", "30m": "30 Minutes", "60m": "60 Minutes",
-        "90m": "90 Minutes", "1h": "1 Hour", "1d": "1 Day",
-        "5d": "5 Days", "1wk": "1 Week", "1mo": "1 Month"
+        "1m": "1 Minute", "3m": "3 Minutes", "5m": "5 Minutes", "10m": "10 Minutes",
+        "15m": "15 Minutes", "30m": "30 Minutes", "45m": "45 Minutes",
+        "1h": "1 Hour", "2h": "2 Hours", "4h": "4 Hours"
     }
     selected_interval = st.selectbox(
         "Select Chart Time Interval",
@@ -374,6 +391,26 @@ with tab1:
     if not st.session_state.watchlist:
         st.info("📝 Add stocks to your watchlist using the sidebar to get started!")
     else:
+        # Download button
+        watchlist_data = pd.DataFrame([
+            {
+                'Symbol': symbol,
+                'Price': info['price'],
+                'Change (%)': info['change_pct'],
+                'Volume': info['volume'],
+                'Open': info['open'],
+                'High': info['high'],
+                'Low': info['low'],
+                'Last Updated': info['last_update']
+            } for symbol, info in st.session_state.watchlist.items()
+        ])
+        st.download_button(
+            label="📥 Download Watchlist",
+            data=watchlist_data.to_csv(index=False),
+            file_name="watchlist.csv",
+            mime="text/csv"
+        )
+        
         for symbol, stock_info in st.session_state.watchlist.items():
             with st.container():
                 st.subheader(f"📊 {symbol}")
@@ -411,8 +448,22 @@ with tab2:
     if st.session_state.watchlist:
         st.markdown("Percentage change for all stocks in the watchlist")
         
+        # Filter dropdown
+        filter_option = st.selectbox(
+            "Filter Stocks",
+            options=["All Stocks", "Top Gainers", "Top Losers"],
+            help="Filter stocks by performance"
+        )
+        
         symbols = list(st.session_state.watchlist.keys())
         changes = [st.session_state.watchlist[symbol]['change_pct'] for symbol in symbols]
+        
+        if filter_option == "Top Gainers":
+            sorted_pairs = sorted(zip(symbols, changes), key=lambda x: x[1], reverse=True)[:3]
+            symbols, changes = zip(*sorted_pairs) if sorted_pairs else ([], [])
+        elif filter_option == "Top Losers":
+            sorted_pairs = sorted(zip(symbols, changes), key=lambda x: x[1])[:3]
+            symbols, changes = zip(*sorted_pairs) if sorted_pairs else ([], [])
         
         fig = create_portfolio_chart(symbols, changes)
         if fig:
