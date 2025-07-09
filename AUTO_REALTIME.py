@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
-from datetime import datetime
+from datetime import datetime, time as dt_time
 import pytz
 import threading
 from streamlit_autorefresh import st_autorefresh
@@ -26,7 +26,7 @@ if 'refresh_count' not in st.session_state:
 # Custom functions
 def get_stock_data(symbol, interval, period='1d'):
     try:
-        # Adjust period for 1d interval to ensure enough data
+        # Adjust period for 1d interval to ensure enough data for candlestick charts
         period = '1mo' if interval == '1d' else period
         stock = yf.Ticker(symbol)
         df = stock.history(period=period, interval=interval)
@@ -57,6 +57,28 @@ def get_stock_data(symbol, interval, period='1d'):
         st.error(f"Error fetching data for {symbol}: {str(e)}")
         return None
 
+def get_volume_trend_data(symbol):
+    try:
+        stock = yf.Ticker(symbol)
+        # Fetch 1-minute data for the last trading day
+        df = stock.history(period='1d', interval='1m')
+        if df.empty or len(df) < 2:
+            st.error(f"No intraday data for {symbol}")
+            return None
+        # Filter for market hours (9:30 AM to 4:00 PM EDT)
+        local_tz = pytz.timezone('America/New_York')
+        df = df.tz_convert(local_tz)
+        market_open = dt_time(9, 30)  # 9:30 AM
+        market_close = dt_time(16, 0)  # 4:00 PM
+        df = df.between_time(market_open, market_close)
+        if df.empty:
+            st.error(f"No data for {symbol} during market hours (9:30 AM–4:00 PM EDT)")
+            return None
+        return df
+    except Exception as e:
+        st.error(f"Error fetching intraday data for {symbol}: {str(e)}")
+        return None
+
 def create_candlestick_chart(df, symbol, interval):
     if df is not None and not df.empty:
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, subplot_titles=('Candlestick', 'Volume'), row_heights=[0.7, 0.3])
@@ -85,8 +107,8 @@ def create_candlestick_chart(df, symbol, interval):
 
 def create_volume_trend_chart(df, symbol):
     if df is not None and not df.empty and len(df) >= 2:
-        volume_data = df['Volume'].tail(10)
-        labels = volume_data.index.tz_convert(pytz.timezone('America/New_York')).strftime('%Y-%m-%d %H:%M')
+        volume_data = df['Volume']
+        labels = volume_data.index.strftime('%H:%M')  # Show only time (e.g., 09:30, 10:00)
         
         fig = go.Figure()
         fig.add_trace(go.Scatter(
@@ -100,8 +122,8 @@ def create_volume_trend_chart(df, symbol):
         ))
         
         fig.update_layout(
-            title=f"Volume Trend for {symbol} (Last 10 Periods)",
-            xaxis_title="Time",
+            title=f"Volume Trend for {symbol} (Market Hours: 9:30 AM–4:00 PM EDT)",
+            xaxis_title="Time (EDT)",
             yaxis_title="Volume",
             template="plotly_white",
             showlegend=True
@@ -133,7 +155,7 @@ threading.Thread(target=display_clock, daemon=True).start()
 st.title("📈 Real-Time Stock Monitoring Dashboard")
 st.markdown("Track multiple stocks with interactive candlestick charts and real-time updates")
 
-# Auto-refresh logic (must be before sidebar to ensure timestamp updates)
+# Auto-refresh logic (before sidebar to ensure timestamp updates)
 if st.session_state.auto_refresh:
     # Convert interval to milliseconds (60 seconds = 60000 ms)
     refresh_count = st_autorefresh(interval=st.session_state.refresh_interval * 1000, key="stockrefresh")
@@ -153,7 +175,7 @@ if st.session_state.auto_refresh:
                     st.session_state.watchlist[symbol]['change_pct'] = data['change_pct']
                     st.session_state.watchlist[symbol]['volume_change_pct'] = data['volume_change_pct']
                     any_data_updated = True
-            st.session_state.last_refresh_time = time.time()  # Update timestamp even if no data fetched
+            st.session_state.last_refresh_time = time.time()  # Update timestamp every refresh
             if any_data_updated:
                 st.session_state.refresh_count += 1
             else:
@@ -262,7 +284,7 @@ with st.sidebar:
     selected_volume_stock = st.selectbox(
         "Select Stock for Volume Trend",
         options=list(st.session_state.watchlist.keys()) if st.session_state.watchlist else ["No stocks available"],
-        help="Select a stock to view its volume trend"
+        help="Select a stock to view its volume trend (9:30 AM–4:00 PM EDT)"
     )
 
 # Main content area
@@ -359,14 +381,14 @@ if st.session_state.watchlist:
 # Volume Trend Analysis
 if st.session_state.watchlist and selected_volume_stock in st.session_state.watchlist:
     st.subheader(f"📈 Volume Trend for {selected_volume_stock}")
-    st.markdown("Volume over the last 10 periods")
+    st.markdown("Volume from 9:30 AM to 4:00 PM EDT")
     
-    df = st.session_state.watchlist[selected_volume_stock]['data']
+    df = get_volume_trend_data(selected_volume_stock)
     fig = create_volume_trend_chart(df, selected_volume_stock)
     if fig:
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.warning("Not enough data for volume trend chart (minimum 2 periods required)")
+        st.warning("Not enough data for volume trend chart (9:30 AM–4:00 PM EDT)")
 
 # Footer
 st.markdown("---")
