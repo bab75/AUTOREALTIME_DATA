@@ -605,7 +605,7 @@ with st.sidebar:
     )
     
     extended_hours = st.toggle(
-        #"Include Extended Hours (Pre/Post-Market)",
+        #"Include Extended Hours(Pre/Post-Market)",
         "EH Hours(Pre/Post)",
         value=False,
         help="Include pre-market (4:00 AM–9:30 AM EDT) and post-market (4:00 PM–8:00 PM EDT) data"
@@ -728,18 +728,23 @@ with tab1:
                 
                 st.markdown(f"**Last Updated:** {stock_info['last_update']}")
                 
-                # Single-line metrics display
-                col1, col2, col3, col4, col5 = st.columns([1.5, 1, 1, 1, 1.5])
-                with col1:
-                    st.markdown(f"<span style='font-size: 16px; font-weight: bold; color: {'#4CAF50' if stock_info['change_pct'] >= 0 else '#F44336'};'>Price: ${stock_info['price']:.2f} ({stock_info['change_pct']:+.3f}%)</span>", unsafe_allow_html=True)
-                with col2:
-                    st.markdown(f"<span style='font-size: 16px; font-weight: bold;'>Open: ${stock_info['open']:.2f}</span>", unsafe_allow_html=True)
-                with col3:
-                    st.markdown(f"<span style='font-size: 16px; font-weight: bold;'>High: ${stock_info['high']:.2f}</span>", unsafe_allow_html=True)
-                with col4:
-                    st.markdown(f"<span style='font-size: 16px; font-weight: bold;'>Low: ${stock_info['low']:.2f}</span>", unsafe_allow_html=True)
-                with col5:
-                    st.markdown(f"<span style='font-size: 16px; font-weight: bold; color: {'#4CAF50' if stock_info['volume_change_pct'] >= 0 else '#F44336'};'>Volume: {int(stock_info['volume']):,}</span>", unsafe_allow_html=True)
+                st.markdown(f"""
+                    <div style="position: relative; min-height: 60px;">
+                        <div style="position: absolute; top: 0; right: 0; text-align: right;">
+                            <div style="font-size: 18px; font-weight: bold; color: {'green' if stock_info['change_pct'] >= 0 else 'red'};">Current Price: ${stock_info['price']:.2f}</div>
+                            <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['change_pct'] >= 0 else 'red'};">Change: {stock_info['change_pct']:+.3f}%</div>
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                st.metric("📈 Open", f"${stock_info['open']:.2f}")
+                st.metric("📊 High", f"${stock_info['high']:.2f}")
+                st.metric("📉 Low", f"${stock_info['low']:.2f}")
+                st.markdown(f"""
+                    <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['volume_change_pct'] >= 0 else 'red'};">
+                        📦 Volume: {int(stock_info['volume']):,}
+                    </div>
+                """, unsafe_allow_html=True)
                 
                 fig = create_candlestick_chart(stock_info['data'], symbol, stock_info['interval'])
                 if fig:
@@ -817,14 +822,14 @@ with tab3:
     st.header("Volume Trend & Recommendations")
     if st.session_state.watchlist and selected_volume_stock in st.session_state.watchlist:
         st.subheader(f"📈 Volume Trend for {selected_volume_stock}")
-        st.markdown("Volume from current or last trading day")
+        st.markdown("Volume from last trading day")
         
         df_volume = get_volume_trend_data(selected_volume_stock, extended_hours)
         fig = create_volume_trend_chart(df_volume, selected_volume_stock)
         if fig:
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("Not enough data for volume trend chart (current or last trading day)")
+            st.warning("Not enough data for volume trend chart (last trading day)")
         
         st.subheader("Recommendations")
         df_candlestick = st.session_state.watchlist[selected_volume_stock]['data']
