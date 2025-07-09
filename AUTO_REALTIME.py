@@ -64,13 +64,20 @@ def detect_candlestick_patterns(df):
         open_p, close_p, high_p, low_p = prev['Open'], prev['Close'], prev['High'], prev['Low']
         open_p2, close_p2 = prev2['Open'], prev2['Close']
         
+        # Calculate confidence (volume and RSI-based)
+        avg_volume = df['Volume'].iloc[max(0, i-20):i].mean()
+        volume_score = 50 if df['Volume'].iloc[i] > 1.5 * avg_volume else 0
+        rsi = calculate_rsi(df.iloc[:i+1]).iloc[-1] if len(df.iloc[:i+1]) >= 14 else 50
+        rsi_score = 50 * (rsi / 100) if rsi <= 50 else 50 * ((100 - rsi) / 100)
+        
         # Bullish Engulfing
         if close_p < open_p and close_c > open_c and close_c > open_p and open_c < close_p:
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Bullish Engulfing',
                 'Signal': 'Bullish',
-                'Details': 'Price may rise after engulfing prior bearish candle'
+                'Details': 'Price may rise after engulfing prior bearish candle',
+                'Confidence': round(volume_score + rsi_score, 1)
             })
         # Bearish Engulfing
         elif close_p > open_p and close_c < open_c and close_c < open_p and open_c > close_p:
@@ -78,7 +85,8 @@ def detect_candlestick_patterns(df):
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Bearish Engulfing',
                 'Signal': 'Bearish',
-                'Details': 'Price may fall after engulfing prior bullish candle'
+                'Details': 'Price may fall after engulfing prior bullish candle',
+                'Confidence': round(volume_score + (50 - rsi_score), 1)
             })
         # Doji
         elif abs(close_c - open_c) <= (high_c - low_c) * 0.1:
@@ -86,7 +94,8 @@ def detect_candlestick_patterns(df):
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Doji',
                 'Signal': 'Neutral',
-                'Details': 'Market indecision; watch for breakout'
+                'Details': 'Market indecision; watch for breakout',
+                'Confidence': round(volume_score, 1)
             })
         # Hammer
         elif (high_c - low_c) > 2 * abs(close_c - open_c) and (close_c - low_c) >= 0.7 * (high_c - low_c) and (open_c - low_c) >= 0.7 * (high_c - low_c):
@@ -94,7 +103,8 @@ def detect_candlestick_patterns(df):
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Hammer',
                 'Signal': 'Bullish',
-                'Details': 'Potential reversal upward after downtrend'
+                'Details': 'Potential reversal upward after downtrend',
+                'Confidence': round(volume_score + rsi_score, 1)
             })
         # Shooting Star
         elif (high_c - low_c) > 2 * abs(close_c - open_c) and (high_c - close_c) >= 0.7 * (high_c - low_c) and (high_c - open_c) >= 0.7 * (high_c - low_c):
@@ -102,26 +112,98 @@ def detect_candlestick_patterns(df):
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Shooting Star',
                 'Signal': 'Bearish',
-                'Details': 'Potential reversal downward after uptrend'
+                'Details': 'Potential reversal downward after uptrend',
+                'Confidence': round(volume_score + (50 - rsi_score), 1)
             })
-        # Morning Star (3-candle pattern)
+        # Morning Star
         elif close_p2 > open_p2 and close_p < open_p and abs(close_p - open_p) < (high_p - low_p) * 0.3 and close_c > open_c and close_c > (open_p2 + close_p2) / 2:
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Morning Star',
                 'Signal': 'Bullish',
-                'Details': 'Strong reversal upward after downtrend'
+                'Details': 'Strong reversal upward after downtrend',
+                'Confidence': round(volume_score + rsi_score, 1)
             })
-        # Evening Star (3-candle pattern)
+        # Evening Star
         elif close_p2 < open_p2 and close_p > open_p and abs(close_p - open_p) < (high_p - low_p) * 0.3 and close_c < open_c and close_c < (open_p2 + close_p2) / 2:
             patterns.append({
                 'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
                 'Pattern': 'Evening Star',
                 'Signal': 'Bearish',
-                'Details': 'Strong reversal downward after uptrend'
+                'Details': 'Strong reversal downward after uptrend',
+                'Confidence': round(volume_score + (50 - rsi_score), 1)
+            })
+        # Bullish Harami
+        elif close_p < open_p and close_c > open_c and open_c >= close_p and close_c <= open_p:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Bullish Harami',
+                'Signal': 'Bullish',
+                'Details': 'Potential reversal upward; small bullish candle inside bearish candle',
+                'Confidence': round(volume_score + rsi_score, 1)
+            })
+        # Bearish Harami
+        elif close_p > open_p and close_c < open_c and open_c <= close_p and close_c >= open_p:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Bearish Harami',
+                'Signal': 'Bearish',
+                'Details': 'Potential reversal downward; small bearish candle inside bullish candle',
+                'Confidence': round(volume_score + (50 - rsi_score), 1)
+            })
+        # Bullish Kicker
+        elif close_p < open_p and close_c > open_c and open_c > high_p:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Bullish Kicker',
+                'Signal': 'Bullish',
+                'Details': 'Strong bullish reversal with gap up after downtrend',
+                'Confidence': round(volume_score + rsi_score, 1)
+            })
+        # Bearish Kicker
+        elif close_p > open_p and close_c < open_c and open_c < low_p:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Bearish Kicker',
+                'Signal': 'Bearish',
+                'Details': 'Strong bearish reversal with gap down after uptrend',
+                'Confidence': round(volume_score + (50 - rsi_score), 1)
+            })
+        # Three White Soldiers
+        if i >= 3 and close_c > open_c and close_p > open_p and close_p2 > open_p2 and \
+           (close_c - open_c) > (high_c - low_c) * 0.5 and (close_p - open_p) > (high_p - low_p) * 0.5 and \
+           (close_p2 - open_p2) > (high_p2 - low_p2) * 0.5:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Three White Soldiers',
+                'Signal': 'Bullish',
+                'Details': 'Strong upward momentum with three consecutive bullish candles',
+                'Confidence': round(volume_score + rsi_score, 1)
+            })
+        # Three Black Crows
+        elif i >= 3 and close_c < open_c and close_p < open_p and close_p2 < open_p2 and \
+             (open_c - close_c) > (high_c - low_c) * 0.5 and (open_p - close_p) > (high_p - low_p) * 0.5 and \
+             (open_p2 - close_p2) > (high_p2 - low_p2) * 0.5:
+            patterns.append({
+                'Timestamp': curr.name.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'Pattern': 'Three Black Crows',
+                'Signal': 'Bearish',
+                'Details': 'Strong downward momentum with three consecutive bearish candles',
+                'Confidence': round(volume_score + (50 - rsi_score), 1)
             })
     
     return patterns
+
+# Style candlestick patterns table
+def style_patterns_df(df):
+    def color_rows(row):
+        if row['Signal'] == 'Bullish':
+            return ['background-color: #90EE90'] * len(row)
+        elif row['Signal'] == 'Bearish':
+            return ['background-color: #FFB6C1'] * len(row)
+        else:
+            return ['background-color: #FFFFFF'] * len(row)
+    return df.style.apply(color_rows, axis=1).format({'Confidence': '{:.1f}'})
 
 # Custom functions
 def get_stock_data(symbol, interval):
@@ -211,6 +293,7 @@ def create_candlestick_chart(df, symbol, interval):
         fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.1, 
                            subplot_titles=('Candlestick', 'Volume', 'RSI'), row_heights=[0.5, 0.3, 0.2])
         
+        # Candlestick
         fig.add_trace(go.Candlestick(x=df.index,
                                     open=df['Open'],
                                     high=df['High'],
@@ -219,15 +302,18 @@ def create_candlestick_chart(df, symbol, interval):
                                     name=symbol),
                      row=1, col=1)
         
+        # SMA
         if len(df) >= 50:
             sma = df['Close'].rolling(window=50).mean()
             fig.add_trace(go.Scatter(x=df.index, y=sma, name='50-Period SMA', line=dict(color='orange', width=2)), row=1, col=1)
         else:
             st.warning(f"Insufficient data for 50-period SMA ({len(df)} candles < 50)")
         
+        # Volume
         colors = ['green' if df['Volume'].iloc[i] >= df['Volume'].iloc[max(0, i-1)] else 'red' for i in range(len(df))]
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume', marker_color=colors), row=2, col=1)
         
+        # RSI
         if len(df) >= 14:
             rsi = calculate_rsi(df)
             fig.add_trace(go.Scatter(x=df.index, y=rsi, name='RSI (14)', line=dict(color='purple', width=2)), row=3, col=1)
@@ -235,6 +321,23 @@ def create_candlestick_chart(df, symbol, interval):
             fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
         else:
             st.warning(f"Insufficient data for RSI ({len(df)} candles < 14)")
+        
+        # Pattern markers
+        patterns = detect_candlestick_patterns(df)
+        for pattern in patterns:
+            timestamp = pd.to_datetime(pattern['Timestamp'])
+            if timestamp in df.index:
+                price = df.loc[timestamp]['High'] * 1.01  # Slightly above high
+                marker_color = 'green' if pattern['Signal'] == 'Bullish' else 'red' if pattern['Signal'] == 'Bearish' else 'gray'
+                fig.add_trace(go.Scatter(
+                    x=[timestamp],
+                    y=[price],
+                    mode='markers',
+                    marker=dict(symbol='triangle-down', size=10, color=marker_color),
+                    name=pattern['Pattern'],
+                    text=[pattern['Pattern']],
+                    textposition='top center'
+                ), row=1, col=1)
         
         fig.update_layout(
             title=f"{symbol} Candlestick Chart ({interval})",
@@ -326,6 +429,11 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
             recommendations.append(f"{symbol} ({change_pct:+.3f}%) shows bearish momentum; consider selling or waiting for a reversal.")
         else:
             recommendations.append(f"{symbol} ({change_pct:+.3f}%) is stable; monitor for breakout patterns or candlestick signals.")
+    
+    # Candlestick patterns
+    patterns = detect_candlestick_patterns(df_candlestick)
+    for pattern in patterns[-3:]:  # Show last 3 patterns
+        recommendations.append(f"{pattern['Signal']} pattern detected at {pattern['Timestamp']}: {pattern['Pattern']} ({pattern['Details']}, Confidence: {pattern['Confidence']:.1f})")
     
     # SMA
     if df_candlestick is not None and len(df_candlestick) >= 50:
@@ -576,7 +684,13 @@ with tab1:
                     patterns = detect_candlestick_patterns(stock_info['data'])
                     if patterns:
                         patterns_df = pd.DataFrame(patterns)
-                        st.table(patterns_df)
+                        st.dataframe(style_patterns_df(patterns_df), use_container_width=True)
+                        st.download_button(
+                            label="📥 Download Candlestick Patterns",
+                            data=patterns_df.to_csv(index=False),
+                            file_name=f"{symbol}_candlestick_patterns.csv",
+                            mime="text/csv"
+                        )
                     else:
                         st.info("No candlestick patterns detected for this stock")
                 
@@ -598,8 +712,8 @@ with tab2:
                 st.warning(f"Invalid change_pct for {symbol}: {change}")
         
         # Debug output
-        #st.write(f"Valid Symbols: {valid_symbols}")
-        #st.write(f"Valid Changes: {changes}")
+        st.write(f"Valid Symbols: {valid_symbols}")
+        st.write(f"Valid Changes: {changes}")
         
         if not valid_symbols:
             st.warning("No valid stocks available for portfolio performance chart")
