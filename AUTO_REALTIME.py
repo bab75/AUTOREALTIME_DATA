@@ -274,10 +274,23 @@ def get_stock_data(symbol, interval, extended_hours=False):
         if extended_hours:
             df = df.between_time(dt_time(4, 0), dt_time(20, 0))  # Pre/post-market
         else:
-            df = df[df.index.date == today]
+            df = df[df.index.date == today].between_time(dt_time(9, 30), dt_time(16, 0))  # Regular hours
         
+        # Validate last candle
+        if not df.empty and len(df) >= 2:
+            last_candle = df.iloc[-1]
+            if last_candle['Open'] == last_candle['High'] == last_candle['Low'] == last_candle['Close']:
+                st.warning(f"Last candle for {symbol} has identical OHLC values (${last_candle['Open']:.2f}), possibly incomplete. Trying to fetch more data...")
+                # Try fetching more recent data
+                df = stock.history(period='1d', interval=fetch_interval)
+                df = df.tz_convert(local_tz)
+                if extended_hours:
+                    df = df.between_time(dt_time(4, 0), dt_time(20, 0))
+                else:
+                    df = df[df.index.date == today].between_time(dt_time(9, 30), dt_time(16, 0))
+        
+        # Fallback to previous trading day if no valid data
         if df.empty or len(df) < 2:
-            # Fallback to previous trading day
             yesterday = today - timedelta(days=1)
             df = stock.history(period='2d', interval=fetch_interval)
             df = df.tz_convert(local_tz)
@@ -288,8 +301,13 @@ def get_stock_data(symbol, interval, extended_hours=False):
                 df = df.between_time(dt_time(9, 30), dt_time(16, 0))
             
             if df.empty or len(df) < 2:
-                st.warning(f"No data for {symbol} on current or previous trading day with interval {interval}")
+                st.warning(f"No valid data for {symbol} on current or previous trading day with interval {interval}")
                 return None
+        
+        # Final validation of last candle
+        last_candle = df.iloc[-1]
+        if last_candle['Open'] == last_candle['High'] == last_candle['Low'] == last_candle['Close']:
+            st.warning(f"Last candle for {symbol} still has identical OHLC values (${last_candle['Open']:.2f}) after retry. Data may be stale or from low-liquidity period.")
         
         current_price = df['Close'].iloc[-1]
         previous_price = df['Close'].iloc[-2]
@@ -299,6 +317,10 @@ def get_stock_data(symbol, interval, extended_hours=False):
         timestamp_local = timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')
         change_pct = round(((current_price - previous_price) / previous_price) * 100, 3)
         volume_change_pct = round(((current_volume - previous_volume) / previous_volume) * 100, 3) if previous_volume > 0 else 0
+        
+        # Debug output
+        st.write(f"Debug: Last candle for {symbol} at {timestamp_local}: Open=${last_candle['Open']:.2f}, High=${last_candle['High']:.2f}, Low=${last_candle['Low']:.2f}, Close=${last_candle['Close']:.2f}, Volume={int(last_candle['Volume']):,}")
+        
         return {
             'data': df,
             'price': current_price,
@@ -333,6 +355,10 @@ def get_volume_trend_data(symbol, extended_hours=False):
             df_today = df_today.between_time(dt_time(9, 30), dt_time(16, 0))
         
         if not df_today.empty and len(df_today) >= 2:
+            # Validate last candle
+            last_candle = df_today.iloc[-1]
+            if last_candle['Open'] == last_candle['High'] == last_candle['Low'] == last_candle['Close']:
+                st.warning(f"Last volume trend candle for {symbol} has identical OHLC values (${last_candle['Open']:.2f}). Data may be incomplete.")
             return df_today
         
         # Fallback to previous trading day
@@ -605,8 +631,7 @@ with st.sidebar:
     )
     
     extended_hours = st.toggle(
-        #"Include Extended Hours(Pre/Post-Market)",
-        "EH Hours(Pre/Post)",
+        "Include Extended Hours (Pre/Post-Market)",
         value=False,
         help="Include pre-market (4:00 AM–9:30 AM EDT) and post-market (4:00 PM–8:00 PM EDT) data"
     )
@@ -688,7 +713,7 @@ with st.sidebar:
     selected_volume_stock = st.selectbox(
         "Select Stock for Volume Trend",
         options=list(st.session_state.watchlist.keys()) if st.session_state.watchlist else ["No stocks available"],
-        help="Select a stock to view its volume trend (last trading day)"
+        help="Select a stock to view its volume trend (current or last trading day)"
     )
 
 # Main content with tabs
@@ -728,23 +753,18 @@ with tab1:
                 
                 st.markdown(f"**Last Updated:** {stock_info['last_update']}")
                 
-                st.markdown(f"""
-                    <div style="position: relative; min-height: 60px;">
-                        <div style="position: absolute; top: 0; right: 0; text-align: right;">
-                            <div style="font-size: 18px; font-weight: bold; color: {'green' if stock_info['change_pct'] >= 0 else 'red'};">Current Price: ${stock_info['price']:.2f}</div>
-                            <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['change_pct'] >= 0 else 'red'};">Change: {stock_info['change_pct']:+.3f}%</div>
-                        </div>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                st.metric("📈 Open", f"${stock_info['open']:.2f}")
-                st.metric("📊 High", f"${stock_info['high']:.2f}")
-                st.metric("📉 Low", f"${stock_info['low']:.2f}")
-                st.markdown(f"""
-                    <div style="font-size: 16px; font-weight: bold; color: {'green' if stock_info['volume_change_pct'] >= 0 else 'red'};">
-                        📦 Volume: {int(stock_info['volume']):,}
-                    </div>
-                """, unsafe_allow_html=True)
+                # Single-line metrics display
+                col1, col2, col3, col4, col5 = st.columns([1.5, 1, 1, 1, 1.5])
+                with col1:
+                    st.markdown(f"<span style='font-size: 16px; font-weight: bold; color: {'#4CAF50' if stock_info['change_pct'] >= 0 else '#F44336'};'>Price: ${stock_info['price']:.2f} ({stock_info['change_pct']:+.3f}%)</span>", unsafe_allow_html=True)
+                with col2:
+                    st.markdown(f"<span style='font-size: 16px; font-weight: bold;'>Open: ${stock_info['open']:.2f}</span>", unsafe_allow_html=True)
+                with col3:
+                    st.markdown(f"<span style='font-size: 16px; font-weight: bold;'>High: ${stock_info['high']:.2f}</span>", unsafe_allow_html=True)
+                with col4:
+                    st.markdown(f"<span style='font-size: 16px; font-weight: bold;'>Low: ${stock_info['low']:.2f}</span>", unsafe_allow_html=True)
+                with col5:
+                    st.markdown(f"<span style='font-size: 16px; font-weight: bold; color: {'#4CAF50' if stock_info['volume_change_pct'] >= 0 else '#F44336'};'>Volume: {int(stock_info['volume']):,}</span>", unsafe_allow_html=True)
                 
                 fig = create_candlestick_chart(stock_info['data'], symbol, stock_info['interval'])
                 if fig:
@@ -804,8 +824,8 @@ with tab2:
                 st.warning(f"Invalid change_pct for {symbol}: {change}")
         
         # Debug output
-        #st.write(f"Valid Symbols: {valid_symbols}")
-        #st.write(f"Valid Changes: {changes}")
+        st.write(f"Valid Symbols: {valid_symbols}")
+        st.write(f"Valid Changes: {changes}")
         
         if not valid_symbols:
             st.warning("No valid stocks available for portfolio performance chart")
@@ -822,14 +842,14 @@ with tab3:
     st.header("Volume Trend & Recommendations")
     if st.session_state.watchlist and selected_volume_stock in st.session_state.watchlist:
         st.subheader(f"📈 Volume Trend for {selected_volume_stock}")
-        st.markdown("Volume from last trading day")
+        st.markdown("Volume from current or last trading day")
         
         df_volume = get_volume_trend_data(selected_volume_stock, extended_hours)
         fig = create_volume_trend_chart(df_volume, selected_volume_stock)
         if fig:
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("Not enough data for volume trend chart (last trading day)")
+            st.warning("Not enough data for volume trend chart (current or last trading day)")
         
         st.subheader("Recommendations")
         df_candlestick = st.session_state.watchlist[selected_volume_stock]['data']
