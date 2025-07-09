@@ -270,7 +270,7 @@ def get_mt5_data(symbol, interval, extended_hours=False):
     utc_from = datetime.now(pytz.UTC) - timedelta(days=1)
     rates = mt5.copy_rates_from(symbol, timeframe, utc_from, 1000)
     if not rates or len(rates) < 2:
-        st.error(f"No sufficient MT5 data for {symbol} with interval {interval}")
+        st.error(f"No sufficient MT5 data for {symbol} with interval {interval}. Check symbol in MT5 Market Watch.")
         return None
     
     df = pd.DataFrame(rates)
@@ -658,7 +658,7 @@ threading.Thread(target=display_clock, daemon=True).start()
 
 # Title and description
 st.title("📈 Real-Time Market Monitoring Dashboard")
-st.markdown("Track stocks, forex, and commodities with interactive candlestick charts, breakout patterns, and candlestick signals.")
+st.markdown("Track stocks, forex, and commodities with interactive candlestick charts, breakout patterns, and candlestick signals. **Note**: For MT5, ensure the terminal is running and use broker-specific symbols (e.g., AAPL#, EURUSD).")
 
 # Auto-refresh logic
 if st.session_state.auto_refresh:
@@ -694,14 +694,14 @@ with st.sidebar:
         "Select Data Source",
         options=["yfinance", "MetaTrader5"],
         index=0 if st.session_state.data_source == "yfinance" else 1,
-        help="Choose Yahoo Finance for stocks or MetaTrader5 for stocks, forex, commodities, etc. Note: MT5 stock symbols may have suffixes (e.g., AAPL#, AAPL.cash)."
+        help="Choose Yahoo Finance for stocks or MetaTrader5 for stocks, forex, commodities, etc. Note: MT5 stock symbols may have broker-specific suffixes (e.g., AAPL#, AAPL.cash). Check MT5 Market Watch."
     )
     st.session_state.data_source = data_source
     
     symbol_input = st.text_input(
         "Enter Symbol",
         placeholder="e.g., AAPL (yfinance), EURUSD or AAPL# (MT5)",
-        help="Enter a stock symbol for yfinance (e.g., AAPL) or instrument for MT5 (e.g., EURUSD, AAPL#). Check MT5 Market Watch for broker-specific symbols."
+        help="Enter a stock symbol for yfinance (e.g., AAPL) or instrument for MT5 (e.g., EURUSD, AAPL#). Check MT5 Market Watch for exact symbol names."
     )
     
     interval_options = {
