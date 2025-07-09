@@ -8,6 +8,7 @@ from datetime import datetime, time as dt_time
 import pytz
 import threading
 from streamlit_autorefresh import st_autorefresh
+import numpy as np
 
 # Initialize session state
 if 'watchlist' not in st.session_state:
@@ -38,7 +39,7 @@ def get_stock_data(symbol, interval):
         supported_intervals = {'1m': '1m', '2m': '2m', '3m': '1m', '5m': '5m', '10m': '1m', 
                               '15m': '15m', '30m': '30m', '45m': '1m', '1h': '1h', 
                               '2h': '1h', '3h': '1h', '4h': '1h'}
-        period = '7d' if interval in ['2h', '3h', '4h'] else '1d'  # Extend for SMA/RSI in longer intervals
+        period = '7d' if interval in ['2h', '3h', '4h'] else '1d'
         fetch_interval = supported_intervals[interval]
         
         stock = yf.Ticker(symbol)
@@ -184,7 +185,7 @@ def create_volume_trend_chart(df, symbol):
     return None
 
 def create_portfolio_chart(symbols, changes):
-    if symbols and changes and all(isinstance(c, (int, float)) for c in changes):
+    if symbols and changes and all(isinstance(c, (int, float, np.floating)) and not np.isnan(c) for c in changes):
         fig = go.Figure()
         fig.add_trace(go.Bar(
             x=symbols,
@@ -205,7 +206,9 @@ def create_portfolio_chart(symbols, changes):
             yaxis=dict(zeroline=True, zerolinecolor='black', zerolinewidth=1)
         )
         return fig
-    return None
+    else:
+        st.warning("Invalid or missing data for portfolio chart")
+        return None
 
 def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
     recommendations = []
@@ -219,7 +222,7 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
             spike_times = spikes.index.strftime('%H:%M')
             recommendations.append(f"High volume spikes detected at {', '.join(spike_times)} EDT, indicating strong buying/selling pressure.")
     
-    if isinstance(change_pct, (int, float)):
+    if isinstance(change_pct, (int, float, np.floating)) and not np.isnan(change_pct):
         if change_pct > 2:
             recommendations.append(f"{symbol} (+{change_pct:.3f}%) shows bullish momentum; consider holding or buying on dips.")
         elif change_pct < -2:
@@ -260,9 +263,9 @@ def generate_recommendations(symbol, df_volume, change_pct, df_candlestick):
 
 def generate_alerts(symbol, change_pct, volume_change_pct):
     alerts = []
-    if abs(change_pct) > 5:
+    if isinstance(change_pct, (int, float, np.floating)) and not np.isnan(change_pct) and abs(change_pct) > 5:
         alerts.append(f"Significant price movement in {symbol}: {change_pct:+.3f}%")
-    if volume_change_pct > 100:
+    if isinstance(volume_change_pct, (int, float, np.floating)) and not np.isnan(volume_change_pct) and volume_change_pct > 100:
         alerts.append(f"Significant volume spike in {symbol}: +{volume_change_pct:.3f}%")
     return alerts
 
@@ -483,41 +486,50 @@ with tab1:
 
 with tab2:
     st.header("Portfolio Performance Overview")
+    st.markdown("Percentage change for stocks in your watchlist")
     if st.session_state.watchlist:
-        st.markdown("Percentage change for all stocks in the watchlist")
-        
         filter_option = st.selectbox(
             "Filter Stocks",
             options=["All Stocks", "Top Gainers", "Top Losers"],
-            help="Filter stocks by performance"
+            help="All Stocks: All watchlist stocks; Top Gainers: Top 3 by % change; Top Losers: Bottom 3 by % change"
         )
         
         symbols = list(st.session_state.watchlist.keys())
-        changes = [st.session_state.watchlist[symbol]['change_pct'] for symbol in symbols]
+        changes = []
+        valid_symbols = []
+        for symbol in symbols:
+            change = st.session_state.watchlist[symbol]['change_pct']
+            if isinstance(change, (int, float, np.floating)) and not np.isnan(change):
+                changes.append(change)
+                valid_symbols.append(symbol)
+            else:
+                st.warning(f"Invalid change_pct for {symbol}: {change}")
         
         # Debug output
-        if not symbols or not changes:
-            st.warning("No valid data available for portfolio performance chart")
-        else:
-            st.write(f"Symbols: {symbols}")
-            st.write(f"Changes: {changes}")
+        st.write(f"Valid Symbols: {valid_symbols}")
+        st.write(f"Valid Changes: {changes}")
         
-        if filter_option == "Top Gainers":
-            sorted_pairs = sorted(zip(symbols, changes), key=lambda x: x[1], reverse=True)[:3]
-            symbols, changes = zip(*sorted_pairs) if sorted_pairs else ([], [])
-            if not sorted_pairs:
-                st.warning("No qualifying stocks for Top Gainers")
-        elif filter_option == "Top Losers":
-            sorted_pairs = sorted(zip(symbols, changes), key=lambda x: x[1])[:3]
-            symbols, changes = zip(*sorted_pairs) if sorted_pairs else ([], [])
-            if not sorted_pairs:
-                st.warning("No qualifying stocks for Top Losers")
-        
-        fig = create_portfolio_chart(symbols, changes)
-        if fig:
-            st.plotly_chart(fig, use_container_width=True)
+        if not valid_symbols:
+            st.warning("No valid stocks available for portfolio performance chart")
         else:
-            st.warning("No valid data available for portfolio performance chart")
+            if filter_option == "Top Gainers":
+                sorted_pairs = sorted(zip(valid_symbols, changes), key=lambda x: x[1], reverse=True)[:3]
+                symbols, changes = zip(*sorted_pairs) if sorted_pairs else ([], [])
+                if not sorted_pairs:
+                    st.warning("No qualifying stocks for Top Gainers")
+            elif filter_option == "Top Losers":
+                sorted_pairs = sorted(zip(valid_symbols, changes), key=lambda x: x[1])[:3]
+                symbols, changes = zip(*sorted_pairs) if sorted_pairs else ([], [])
+                if not sorted_pairs:
+                    st.warning("No qualifying stocks for Top Losers")
+            else:
+                symbols, changes = valid_symbols, changes
+            
+            fig = create_portfolio_chart(symbols, changes)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Failed to render portfolio performance chart")
     else:
         st.info("No stocks in watchlist to display portfolio performance.")
 
