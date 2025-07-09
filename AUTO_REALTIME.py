@@ -15,7 +15,7 @@ if 'watchlist' not in st.session_state:
     st.session_state.watchlist = {}
 if 'auto_refresh' not in st.session_state:
     st.session_state.auto_refresh = False
-if 'refresh制限: if 'refresh_interval' not in st.session_state:
+if 'refresh_interval' not in st.session_state:
     st.session_state.refresh_interval = 60  # Default to 60 seconds
 if 'last_refresh_time' not in st.session_state:
     st.session_state.last_refresh_time = time.time()
